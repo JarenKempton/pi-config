@@ -3,5 +3,8 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "low",
-  "theme": "github-dark-default"
+  "theme": "github-dark-default",
+  "packages": [
+    "git:git@github.com:JarenKempton/pi-config"
+  ]
 }
