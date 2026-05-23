@@ -23,6 +23,32 @@ That installed directory is the canonical local checkout. Pi loads resources fro
 - `themes/` — themes
 - `settings.json` — portable defaults you can copy or symlink if desired
 
+## Local layout
+
+Keep shared config in the Git package checkout only:
+
+```text
+~/.pi/agent/git/github.com/JarenKempton/pi-config
+```
+
+Do not keep separate local copies in these folders:
+
+```text
+~/.pi/agent/extensions
+~/.pi/agent/prompts
+~/.pi/agent/skills
+~/.pi/agent/themes
+```
+
+Those folders should be absent unless you intentionally need machine-local, non-shared resources. Shared resources belong in this repo and are loaded through the `packages` entry in `~/.pi/agent/settings.json`.
+
+Keep machine-local/private files outside the repo, for example:
+
+- `~/.pi/agent/auth.json`
+- `~/.pi/agent/sessions/`
+- `~/.pi/agent/bin/`
+- crash logs or other local runtime files
+
 ## Fresh machine setup
 
 1. Install Pi and authenticate:
@@ -40,7 +66,15 @@ That installed directory is the canonical local checkout. Pi loads resources fro
 
 3. Restart Pi, or run `/reload` from inside Pi.
 
-4. Optional: apply the shared settings from this repo:
+4. Make sure `~/.pi/agent/settings.json` points at this package:
+
+   ```json
+   {
+     "packages": ["git:git@github.com:JarenKempton/pi-config"]
+   }
+   ```
+
+   You can also copy the shared defaults from this repo, then keep the `packages` entry:
 
    ```bash
    cp ~/.pi/agent/git/github.com/JarenKempton/pi-config/settings.json ~/.pi/agent/settings.json
@@ -83,3 +117,4 @@ git push
 
 - Do not use `~/code/pi-config` as a special path. Pi's package checkout under `~/.pi/agent/git/...` is the standard location.
 - If a machine already has an old manual clone, either remove it or ignore it after installing this package through `pi install`.
+- If local `~/.pi/agent/extensions`, `prompts`, `skills`, or `themes` folders already exist, migrate anything useful into this repo, push it, then remove the local folders to avoid split-brain config.
