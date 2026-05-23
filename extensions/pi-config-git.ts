@@ -120,8 +120,16 @@ export default function (pi: ExtensionAPI) {
     if (!isTrackedConfigPath(inputPath)) return;
 
     const result = await commitIfDirty(pi, `${event.toolName} ${inputPath}`);
-    if (result.changed) {
-      ctx.ui.notify(`Auto-committed pi config: ${result.message}`, "info");
+    if (!result.changed) return;
+
+    ctx.ui.notify(`Auto-committed pi config: ${result.message}`, "info");
+
+    const push = await execGit(pi, ["push"]);
+    if (push.code !== 0) {
+      ctx.ui.notify((push.stderr || push.stdout || "git push failed").trim(), "error");
+      return;
     }
+
+    ctx.ui.notify("Auto-pushed pi config to GitHub.", "info");
   });
 }
