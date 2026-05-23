@@ -24,6 +24,14 @@ Then implement working code (HTML/CSS/JS, React, Vue, etc.) that is:
 - Cohesive with a clear aesthetic point-of-view
 - Meticulously refined in every detail
 
+## Project Constraints and Creative Tension
+
+Respect project constraints: existing design systems, component libraries, accessibility requirements, product principles, brand guidelines, repo conventions, and explicit user instructions override this global frontend-design guidance.
+
+However, do not treat constraints as a reason to become generic. If a bold design idea may conflict with the project's current design level, design-system norms, or established UI patterns, ask the user for feedback before discarding it. Present the creative tradeoff clearly: what the project convention suggests, what the global frontend-design direction suggests, and why the deviation might be worth trying.
+
+Use this skill to expand the design possibility space inside tight systems. Prefer experiments that can be implemented reversibly, behind isolated components, feature branches, or clearly scoped visual variations.
+
 ## Frontend Aesthetics Guidelines
 
 Focus on:
