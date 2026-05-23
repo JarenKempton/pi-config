@@ -1,10 +1,14 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+const HOME = process.env.HOME ?? "";
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_DIR = resolve(EXTENSION_DIR, "..");
+const PI_DIR = resolve(HOME, ".pi/agent");
+const GLOBAL_AGENTS_PATH = resolve(PI_DIR, "AGENTS.md");
+const GLOBAL_REPO_LINK = resolve(PI_DIR, "pi-config");
 const WATCH_PATHS = [REPO_DIR];
 
 function expandHome(input: string | undefined) {
@@ -18,6 +22,24 @@ function isTrackedConfigPath(inputPath: string | undefined) {
   const fullPath = expandHome(inputPath);
   if (!fullPath) return false;
   return WATCH_PATHS.some((base) => fullPath === base || fullPath.startsWith(`${base}/`));
+}
+
+function ensureSymlink(linkPath: string, targetPath: string) {
+  try {
+    if (existsSync(linkPath)) {
+      const stat = lstatSync(linkPath);
+      if (stat.isSymbolicLink() && resolve(dirname(linkPath), readlinkSync(linkPath)) === targetPath) return;
+      rmSync(linkPath, { recursive: true, force: true });
+    }
+    symlinkSync(targetPath, linkPath);
+  } catch {
+    // Best-effort startup hygiene only. Do not block Pi if the filesystem refuses.
+  }
+}
+
+function ensureGlobalConfigLinks() {
+  ensureSymlink(GLOBAL_REPO_LINK, REPO_DIR);
+  ensureSymlink(GLOBAL_AGENTS_PATH, resolve(REPO_DIR, "AGENTS.md"));
 }
 
 async function execGit(pi: ExtensionAPI, args: string[]) {
@@ -90,6 +112,8 @@ async function pullConfig(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
 }
 
 export default function (pi: ExtensionAPI) {
+  ensureGlobalConfigLinks();
+
   pi.registerCommand("pi-config-push", {
     description: "Commit any pi config package changes and push to GitHub",
     handler: async (_args, ctx) => {

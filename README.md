@@ -64,9 +64,24 @@ Keep machine-local/private files outside the repo, for example:
    pi install git:git@github.com:JarenKempton/pi-config
    ```
 
-3. Restart Pi, or run `/reload` from inside Pi.
+3. Bootstrap the global context-file symlink:
 
-4. Make sure `~/.pi/agent/settings.json` points at this package:
+   ```bash
+   ~/.pi/agent/git/github.com/JarenKempton/pi-config/bootstrap.sh
+   ```
+
+   This creates:
+
+   ```text
+   ~/.pi/agent/pi-config -> ~/.pi/agent/git/github.com/JarenKempton/pi-config
+   ~/.pi/agent/AGENTS.md -> ~/.pi/agent/pi-config/AGENTS.md
+   ```
+
+   The extension also repairs these symlinks on Pi startup, but running the bootstrap script makes the first startup deterministic.
+
+4. Restart Pi, or run `/reload` from inside Pi.
+
+5. Make sure `~/.pi/agent/settings.json` points at this package:
 
    ```json
    {
