@@ -1,12 +1,11 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
-const HOME = homedir();
-const REPO_DIR = resolve(HOME, "code/pi-config");
-const PI_DIR = resolve(HOME, ".pi/agent");
-const WATCH_PATHS = [REPO_DIR, PI_DIR];
+const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
+const REPO_DIR = resolve(EXTENSION_DIR, "..");
+const WATCH_PATHS = [REPO_DIR];
 
 function expandHome(input: string | undefined) {
   if (!input) return undefined;
@@ -92,7 +91,7 @@ async function pullConfig(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("pi-config-push", {
-    description: "Commit any pi config changes in ~/code/pi-config and push to GitHub",
+    description: "Commit any pi config package changes and push to GitHub",
     handler: async (_args, ctx) => {
       await pushConfig(pi, ctx);
     },
@@ -106,7 +105,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("pi-config-status", {
-    description: "Show git status for ~/code/pi-config",
+    description: "Show git status for the pi-config package",
     handler: async (_args, ctx) => {
       const status = await getStatus(pi);
       ctx.ui.notify(status || "pi-config clean", "info");
