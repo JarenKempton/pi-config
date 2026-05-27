@@ -96,7 +96,12 @@ Never create SalesAI worktrees in `~/Documents/programming/worktrees`, never use
 5. Fetch ticket context with the appropriate skill/tool using the provided or inferred ticket key.
 6. Research only: inspect likely files, search for relevant identifiers, read docs/tests, and summarize findings.
 7. Decide whether the work should be split across multiple branches/PRs. Consider risk, deployability, migrations, UI/backend coupling, and review size.
-8. Record the plan in a temporary project-local Pi plan file before presenting it:
+8. If the ticket is a bug or regression, add a regression-test gate to the plan:
+   - State that implementation must use the `bug-fix` workflow next.
+   - Sketch the failing regression tests or repro harnesses to add before production-code changes.
+   - Make clear that the agent must add/run the failing tests and report failures for approval before fixing code.
+   - If no correct test seam is obvious, require the agent to explain that and propose the closest runnable repro before implementation.
+9. Record the plan in a temporary project-local Pi plan file before presenting it:
    - Preferred path: `<project-root>/.pi/plan.md`.
    - If operating from a package subdirectory, use that package's `.pi/plan.md` only when it is the established Pi directory for the current worktree; otherwise use the repository root `.pi/plan.md`.
    - Create the `.pi` directory if needed.
@@ -104,15 +109,16 @@ Never create SalesAI worktrees in `~/Documents/programming/worktrees`, never use
    - Include the ticket key/link, branch, worktree path when applicable, current date, goal, relevant context found, proposed implementation steps, test/validation plan, risks/open questions, and whether to split into multiple branches/PRs.
    - Update this file when the user approves a changed plan or when meaningful implementation discoveries alter the plan.
    - Reference this file before implementing, validating, committing, or summarizing ticket work.
-9. Present the recorded plan with:
+10. Present the recorded plan with:
    - plan file path
    - ticket key source: prompt-provided or branch-inferred
    - goal
    - relevant context found
    - proposed implementation steps
    - test/validation plan
+   - regression-test gate when the ticket is a bug
    - risks and open questions
    - whether to split into multiple branches/PRs
-10. Ask for approval before editing code.
+11. Ask for approval before editing code.
 
 Stop after recording and presenting the plan unless the user explicitly approves implementation.
