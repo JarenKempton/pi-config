@@ -7,6 +7,29 @@ description: "Start work from an issue/ticket safely: sync the base branch, crea
 
 This skill starts a ticket without writing code until the user approves the plan.
 
+## Mandatory SalesAI worktree golden path
+
+When the user pastes a Jira ticket URL/key and asks to create/start a new worktree, do **not** merely suggest or print a path. Execute the full setup flow below unless the user explicitly asks for a dry run:
+
+1. Extract the ticket key from the URL/key.
+2. Fetch the Jira ticket summary/context first; use the summary to derive the branch slug.
+3. Compute the SalesAI worktree path exactly as:
+   ```text
+   ~/Documents/programming/salesai-worktrees/<TICKET-KEY>
+   ```
+   Example: `~/Documents/programming/salesai-worktrees/CSU-4215`.
+4. Compute the branch using the repo policy:
+   ```text
+   <type>/<TICKET-KEY>-<short-kebab-case-ticket-summary>
+   ```
+   Example: `fix/CSU-4215-reminder-enable-configured-actions`.
+5. Create the worktree at that exact path from `origin/main`.
+6. Hydrate local ignored files from the source SalesAI worktree.
+7. Run install/generation from the new worktree root.
+8. Verify readiness and report the actual created path.
+
+Never create SalesAI worktrees in `~/Documents/programming/worktrees`, never use ad-hoc names like `browse-<ticket>`, and never hand off a freshly created SalesAI worktree before install/generation/local-file hydration have completed or failed explicitly.
+
 ## Safety rules
 
 - Do not write or edit source code before the user approves the plan.
