@@ -40,18 +40,35 @@ This skill starts a ticket without writing code until the user approves the plan
      git worktree add -b <branch-name> <path> origin/main
      git -C <path> branch --unset-upstream 2>/dev/null || true
      ```
-   Adapt base branch/branch name and worktree path to project rules. Never leave the new feature branch tracking `origin/main`; leave upstream unset until the first push to the branch.
 
-   After creating a worktree, bootstrap it enough that the user can `cd` into it and start development. For the SalesAI repo, run these from the new worktree root unless the user opted out:
+   Worktree path rules are not optional:
+   - For the SalesAI repo at `~/Documents/programming/salesai`, create ticket worktrees under `~/Documents/programming/salesai-worktrees/<TICKET-KEY>`.
+   - Do **not** create SalesAI ticket worktrees under `~/Documents/programming/worktrees`, inside the main repo, or in any ad-hoc sibling folder.
+   - If the intended `<TICKET-KEY>` path already exists, stop and ask before deleting, reusing, or choosing a different name.
+   - After creation, run `git worktree list --porcelain` and verify the path is registered and exactly where expected.
+
+   Adapt base branch and branch name to project rules. Never leave the new feature branch tracking `origin/main`; leave upstream unset until the first push to the branch.
+
+   After creating a worktree, hydrate local ignored files before running install/generation:
+   - Copy repo-local Pi config when present: `.pi/` and package-level Pi config such as `frontend/.pi/`.
+   - Copy frontend local env files when safe: `frontend/.env.local`, `frontend/.env.harness.local`, and `frontend/.env.dev`.
+   - Copy only from the source worktree to the same relative paths in the new worktree.
+   - Never overwrite existing env/Pi files without asking.
+   - Never print secret env values.
+
+   Then bootstrap it enough that the user can `cd` into it and start development. For the SalesAI repo, run these from the new worktree root unless the user opted out:
    ```bash
    npm install
    npm run dev:api-client
    ```
-   Then hydrate frontend local env files when safe:
-   - If the source worktree has `frontend/.env.local`, `frontend/.env.harness.local`, or `frontend/.env.dev` and the new worktree lacks them, copy them to the same paths in the new worktree.
-   - Never overwrite existing env files without asking.
-   - Never print secret env values.
-   - If package install/generation fails, report the exact failure and do not hand off as ready-to-run.
+   If `npm install` changes `package-lock.json` only due to platform/npm metadata, restore it unless the ticket intentionally updates dependencies. If package install/generation fails, report the exact failure and do not hand off as ready-to-run.
+
+   Final readiness check before handoff:
+   ```bash
+   git -C <path> status --short --branch
+   test -d <path>/node_modules
+   test -f <path>/.nx/nxw.js
+   ```
 
 5. Fetch ticket context with the appropriate skill/tool using the provided or inferred ticket key.
 6. Research only: inspect likely files, search for relevant identifiers, read docs/tests, and summarize findings.
