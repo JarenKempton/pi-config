@@ -165,7 +165,7 @@ create_wt() {
     for i in 2 3 4 5 6 7; do STEP_STATUS[$i]="done"; done
     complete_step 8 "Existing worktree found: $path"
     copy_path "$path"
-    printf '\ncd %s\n' "$path"
+    printf '\n%sCommand:%s cd %s\n' "$BOLD" "$RESET" "$path"
     return 0
   fi
 
@@ -200,7 +200,7 @@ create_wt() {
   activate_step 8 "Copying path to clipboard"
   copy_path "$path"
   complete_step 8 "Ready: $path"
-  printf '\ncd %s\n' "$path"
+  printf '\n%sCommand:%s cd %s\n' "$BOLD" "$RESET" "$path"
 }
 
 case "$mode" in
