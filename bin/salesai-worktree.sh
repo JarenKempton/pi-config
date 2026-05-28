@@ -31,62 +31,93 @@ jira_summary() { jira_field_text "$1" | awk -F': ' '/^Summary:/{print substr($0,
 jira_type() { jira_field_text "$1" | awk -F': ' '/^Type:/{print $2; exit}'; }
 copy_path() { have pbcopy && printf '%s' "$1" | pbcopy || true; }
 
+STEPS=(
+  "Read Jira ticket"
+  "Resolve branch and target path"
+  "Fetch origin/${BASE_BRANCH}"
+  "Create git worktree"
+  "Hydrate local files"
+  "Install dependencies"
+  "Generate API client"
+  "Verify readiness"
+  "Copy path"
+)
+STEP_STATUS=()
+for _ in "${STEPS[@]}"; do STEP_STATUS+=("pending"); done
+CURRENT_OUTPUT="starting"
+RENDERED=0
+BLOCK_LINES=$(( ${#STEPS[@]} + 4 ))
 status_file="$(mktemp -t salesai-worktree-status.XXXXXX)"
 trap 'rm -f "$status_file"' EXIT
 
-say_header() {
-  if have gum; then
-    gum style --border rounded --border-foreground 63 --padding "0 2" --margin "0 0 1 0" \
-      "SalesAI worktree setup" \
-      "Deterministic local setup — no agent handoff"
+if [[ -t 1 ]]; then
+  GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; DIM=$'\033[2m'; BOLD=$'\033[1m'; RESET=$'\033[0m'; CLEAR_LINE=$'\033[2K'
+else
+  GREEN=""; YELLOW=""; RED=""; DIM=""; BOLD=""; RESET=""; CLEAR_LINE=""
+fi
+
+truncate_line() {
+  local text="$1" width
+  width="$(tput cols 2>/dev/null || echo 120)"
+  width=$(( width > 20 ? width - 4 : width ))
+  text="$(echo "$text" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
+  if (( ${#text} > width )); then
+    printf '%s…' "${text:0:$((width-1))}"
   else
-    printf 'SalesAI worktree setup\n\n'
+    printf '%s' "$text"
   fi
 }
 
-step_start() {
-  local label="$1"
-  if have gum; then
-    gum style --foreground 245 "○ $label"
-  else
-    printf '○ %s\n' "$label"
+render() {
+  if [[ -t 1 && "$RENDERED" = "1" ]]; then
+    printf '\033[%dA' "$BLOCK_LINES"
   fi
+
+  printf '%s%sSalesAI worktree setup%s\n' "$CLEAR_LINE" "$BOLD" "$RESET"
+  printf '%s%sCurrent:%s %s\n' "$CLEAR_LINE" "$DIM" "$RESET" "$(truncate_line "$CURRENT_OUTPUT")"
+  printf '%s\n' "$CLEAR_LINE"
+
+  local i status label bullet color
+  for i in "${!STEPS[@]}"; do
+    status="${STEP_STATUS[$i]}"
+    label="${STEPS[$i]}"
+    case "$status" in
+      done) bullet="●"; color="$GREEN" ;;
+      active) bullet="●"; color="$YELLOW" ;;
+      failed) bullet="●"; color="$RED" ;;
+      *) bullet="○"; color="$DIM" ;;
+    esac
+    printf '%s  %s%s %s%s\n' "$CLEAR_LINE" "$color" "$bullet" "$label" "$RESET"
+  done
+  RENDERED=1
 }
 
-step_done() {
-  local label="$1" detail="${2:-}"
-  if have gum; then
-    gum style --foreground 42 "● $label"
-    [[ -n "$detail" ]] && gum style --foreground 245 "  $detail"
-  else
-    printf '● %s\n' "$label"
-    [[ -n "$detail" ]] && printf '  %s\n' "$detail"
-  fi
-}
-
-step_fail() {
-  local label="$1" detail="${2:-}"
-  if have gum; then
-    gum style --foreground 196 --bold "✕ $label"
-    [[ -n "$detail" ]] && gum style --foreground 196 "  $detail"
-  else
-    printf '✕ %s\n' "$label"
-    [[ -n "$detail" ]] && printf '  %s\n' "$detail"
-  fi
-}
-
-last_output_line() { grep -v '^$' "$status_file" | tail -1 | cut -c1-180 || true; }
+activate_step() { STEP_STATUS[$1]="active"; CURRENT_OUTPUT="$2"; render; }
+complete_step() { STEP_STATUS[$1]="done"; CURRENT_OUTPUT="$2"; render; }
+fail_step() { STEP_STATUS[$1]="failed"; CURRENT_OUTPUT="$2"; render; }
+last_output_line() { grep -v '^$' "$status_file" | tail -1 | cut -c1-220 || true; }
 
 run_quiet() {
-  local label="$1"; shift
-  step_start "$label"
+  local index="$1" label="$2"; shift 2
+  activate_step "$index" "$label: $*"
   : > "$status_file"
-  if "$@" >"$status_file" 2>&1; then
-    local last; last="$(last_output_line)"
-    step_done "$label" "$last"
+  ("$@" >"$status_file" 2>&1) &
+  local pid=$! previous="" last=""
+  while kill -0 "$pid" 2>/dev/null; do
+    last="$(last_output_line)"
+    if [[ -n "$last" && "$last" != "$previous" ]]; then
+      previous="$last"
+      CURRENT_OUTPUT="$label: $last"
+      render
+    fi
+    sleep 0.25
+  done
+  if wait "$pid"; then
+    last="$(last_output_line)"
+    complete_step "$index" "${last:-$label complete}"
   else
-    local last; last="$(last_output_line)"
-    step_fail "$label" "${last:-Command failed: $*}"
+    last="$(last_output_line)"
+    fail_step "$index" "${last:-$label failed}"
     printf '\nLast command output:\n'
     tail -80 "$status_file"
     exit 1
@@ -111,58 +142,60 @@ create_wt() {
   key="$(extract_key "$input")"
   [[ -z "$key" ]] && { echo "No Jira key found in: $input"; exit 2; }
 
-  say_header
+  CURRENT_OUTPUT="Preparing $key"
+  render
 
-  step_start "Read Jira ticket"
+  activate_step 0 "Reading $key from Jira"
   summary="$(jira_summary "$key")"
   issue_type="$(jira_type "$key")"
   [[ -z "$summary" ]] && summary="worktree"
-  step_done "Read Jira ticket" "$key — $summary"
+  complete_step 0 "$key — $summary"
 
-  step_start "Resolve branch and target path"
+  activate_step 1 "Resolving branch and target path"
   branch="$(branch_type_for "$issue_type $summary")/$key-$(slugify "$summary")"
   path="$WORKTREES_DIR/$key"
-  step_done "Resolve branch and target path" "$branch → $path"
+  complete_step 1 "$branch → $path"
 
   existing="$(git worktree list --porcelain | awk -v p="$path" 'BEGIN{found=0} /^worktree /{found=($0=="worktree " p)} found && /^branch /{print p; exit}')"
   if [[ -n "$existing" || -d "$path/.git" || -f "$path/.git" ]]; then
-    step_done "Use existing worktree" "$path"
+    for i in 2 3 4 5 6 7; do STEP_STATUS[$i]="done"; done
+    complete_step 8 "Existing worktree found: $path"
     copy_path "$path"
     printf '\ncd %s\n' "$path"
     return 0
   fi
 
   mkdir -p "$WORKTREES_DIR"
-  run_quiet "Fetch origin/${BASE_BRANCH}" git -C "$main" fetch origin "$BASE_BRANCH" --prune
+  run_quiet 2 "Fetching origin/${BASE_BRANCH}" git -C "$main" fetch origin "$BASE_BRANCH" --prune
 
   if git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
-    run_quiet "Create git worktree" git -C "$main" worktree add "$path" "$branch"
+    run_quiet 3 "Creating git worktree" git -C "$main" worktree add "$path" "$branch"
   elif git -C "$main" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-    run_quiet "Create git worktree" git -C "$main" worktree add -b "$branch" "$path" "origin/$branch"
+    run_quiet 3 "Creating git worktree" git -C "$main" worktree add -b "$branch" "$path" "origin/$branch"
   else
-    run_quiet "Create git worktree" git -C "$main" worktree add -b "$branch" "$path" "origin/${BASE_BRANCH}"
+    run_quiet 3 "Creating git worktree" git -C "$main" worktree add -b "$branch" "$path" "origin/${BASE_BRANCH}"
     git -C "$path" branch --unset-upstream 2>/dev/null || true
   fi
 
-  step_start "Hydrate local files"
+  activate_step 4 "Copying local ignored files"
   copy_local_files "$main" "$path" >"$status_file" 2>&1 || true
   copied_detail="$(tr '\n' ', ' < "$status_file" | sed 's/, $//' || true)"
   [[ -z "$copied_detail" ]] && copied_detail="No local files needed copying"
-  step_done "Hydrate local files" "$copied_detail"
+  complete_step 4 "$copied_detail"
 
-  run_quiet "Install dependencies" npm --prefix "$path" install
+  run_quiet 5 "Installing dependencies" npm --prefix "$path" install
   if git -C "$path" status --short -- package-lock.json | grep -q .; then git -C "$path" restore package-lock.json || true; fi
 
-  run_quiet "Generate API client" bash -lc "cd '$path' && npm run dev:api-client"
+  run_quiet 6 "Generating API client" bash -lc "cd '$path' && npm run dev:api-client"
 
-  step_start "Verify readiness"
-  [[ -d "$path/node_modules" ]] || { step_fail "Verify readiness" "Missing node_modules"; exit 1; }
-  [[ -f "$path/.nx/nxw.js" ]] || { step_fail "Verify readiness" "Missing .nx/nxw.js"; exit 1; }
-  step_done "Verify readiness" "node_modules and .nx/nxw.js present"
+  activate_step 7 "Checking node_modules and Nx wrapper"
+  [[ -d "$path/node_modules" ]] || { fail_step 7 "Missing node_modules"; exit 1; }
+  [[ -f "$path/.nx/nxw.js" ]] || { fail_step 7 "Missing .nx/nxw.js"; exit 1; }
+  complete_step 7 "node_modules and .nx/nxw.js present"
 
-  step_start "Copy path"
+  activate_step 8 "Copying path to clipboard"
   copy_path "$path"
-  step_done "Copy path" "$path"
+  complete_step 8 "Ready: $path"
   printf '\ncd %s\n' "$path"
 }
 
