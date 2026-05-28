@@ -50,17 +50,45 @@ STEPS=(
 current_step=0
 current_line="Starting…"
 status_file="$(mktemp -t salesai-worktree-status.XXXXXX)"
+rendered_non_tty_header=0
 trap 'rm -f "$status_file"' EXIT
 
 render() {
-  printf '\033[2J\033[H'
-  printf 'SalesAI worktree setup\n\n'
-  printf '  %s\n\n' "$current_line"
-  local i label mark
+  if [[ ! -t 1 ]]; then
+    if (( rendered_non_tty_header == 0 )); then
+      rendered_non_tty_header=1
+      have gum && gum style --border rounded --border-foreground 63 --padding "0 2" "SalesAI worktree setup" || printf 'SalesAI worktree setup\n'
+    fi
+    printf '  %s [%d/%d] %s — %s\n' "$( (( current_step + 1 == ${#STEPS[@]} )) && echo "✓" || echo "▶" )" "$((current_step + 1))" "${#STEPS[@]}" "${STEPS[$current_step]}" "$current_line"
+    return
+  fi
+
+  tput clear 2>/dev/null || printf '\033[2J\033[H'
+
+  if have gum; then
+    gum style --border rounded --border-foreground 63 --padding "0 2" --margin "0 0 1 0" \
+      "SalesAI worktree setup" \
+      "$(printf 'Step %d of %d' "$((current_step + 1))" "${#STEPS[@]}")"
+    gum style --foreground 212 --bold "› $current_line"
+    printf '\n'
+  else
+    printf 'SalesAI worktree setup\n\n'
+    printf '  %s\n\n' "$current_line"
+  fi
+
+  local i label mark line
   for i in "${!STEPS[@]}"; do
     label="${STEPS[$i]}"
-    if (( i < current_step )); then mark="✓"; elif (( i == current_step )); then mark="▶"; else mark="·"; fi
-    printf '  %s [%d/%d] %s\n' "$mark" "$((i+1))" "${#STEPS[@]}" "$label"
+    if (( i < current_step )); then
+      mark="✓"; line="  $mark [$((i+1))/${#STEPS[@]}] $label"
+      have gum && gum style --foreground 42 "$line" || printf '%s\n' "$line"
+    elif (( i == current_step )); then
+      mark="▶"; line="  $mark [$((i+1))/${#STEPS[@]}] $label"
+      have gum && gum style --foreground 214 --bold "$line" || printf '%s\n' "$line"
+    else
+      mark="·"; line="  $mark [$((i+1))/${#STEPS[@]}] $label"
+      have gum && gum style --foreground 245 "$line" || printf '%s\n' "$line"
+    fi
   done
   printf '\n'
 }
@@ -72,12 +100,18 @@ run_live() {
   current_line="$label: $*"; render
   ("$@" >"$status_file" 2>&1) &
   local pid=$!
+  local previous_last=""
   while kill -0 "$pid" 2>/dev/null; do
     local last
     last="$(grep -v '^$' "$status_file" | tail -1 || true)"
-    [[ -n "$last" ]] && current_line="$label: $last"
-    render
-    sleep 0.25
+    if [[ -n "$last" && "$last" != "$previous_last" ]]; then
+      previous_last="$last"
+      current_line="$label: $last"
+      render
+    elif [[ -t 1 ]]; then
+      render
+    fi
+    sleep 0.5
   done
   wait "$pid" || { current_line="$label failed. Last output: $(tail -20 "$status_file" | tr '\n' ' ' | cut -c1-220)"; render; echo; tail -80 "$status_file"; exit 1; }
 }
@@ -117,16 +151,16 @@ create_wt() {
   fi
 
   mkdir -p "$WORKTREES_DIR"
-  step 2 "Fetching origin/$BASE_BRANCH…"
+  step 2 "Fetching origin/${BASE_BRANCH}…"
   run_live "git fetch" git -C "$main" fetch origin "$BASE_BRANCH" --prune
 
-  step 3 "Creating $branch at $path…"
+  step 3 "Creating ${branch} at ${path}…"
   if git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
     run_live "git worktree add" git -C "$main" worktree add "$path" "$branch"
   elif git -C "$main" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
     run_live "git worktree add" git -C "$main" worktree add -b "$branch" "$path" "origin/$branch"
   else
-    run_live "git worktree add" git -C "$main" worktree add -b "$branch" "$path" "origin/$BASE_BRANCH"
+    run_live "git worktree add" git -C "$main" worktree add -b "$branch" "$path" "origin/${BASE_BRANCH}"
     git -C "$path" branch --unset-upstream 2>/dev/null || true
   fi
 
