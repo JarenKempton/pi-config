@@ -6,7 +6,6 @@ arg="${*:-}"
 
 BASE_BRANCH="${PI_WORKTREE_BASE_BRANCH:-main}"
 HOME_DIR="${HOME:-/Users/jaren}"
-SALESAI_MAIN="$HOME_DIR/Documents/programming/salesai"
 WORKTREES_DIR="$HOME_DIR/Documents/programming/salesai-worktrees"
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -28,92 +27,70 @@ jira_field_text() {
   local key="$1"
   acli jira workitem view "$key" 2>/dev/null || acli jira issue view "$key" 2>/dev/null || true
 }
-jira_summary() {
-  jira_field_text "$1" | awk -F': ' '/^Summary:/{print substr($0, index($0,$2)); exit}'
-}
-jira_type() {
-  jira_field_text "$1" | awk -F': ' '/^Type:/{print $2; exit}'
-}
-copy_path() { if have pbcopy; then printf '%s' "$1" | pbcopy; fi; }
+jira_summary() { jira_field_text "$1" | awk -F': ' '/^Summary:/{print substr($0, index($0,$2)); exit}'; }
+jira_type() { jira_field_text "$1" | awk -F': ' '/^Type:/{print $2; exit}'; }
+copy_path() { have pbcopy && printf '%s' "$1" | pbcopy || true; }
 
-STEPS=(
-  "Read Jira ticket"
-  "Resolve branch and target path"
-  "Fetch origin/main"
-  "Create git worktree"
-  "Hydrate local files"
-  "Install dependencies"
-  "Generate API client"
-  "Verify readiness"
-  "Copy path"
-)
-current_step=0
-current_line="Starting…"
 status_file="$(mktemp -t salesai-worktree-status.XXXXXX)"
-rendered_non_tty_header=0
 trap 'rm -f "$status_file"' EXIT
 
-render() {
-  if [[ ! -t 1 ]]; then
-    if (( rendered_non_tty_header == 0 )); then
-      rendered_non_tty_header=1
-      have gum && gum style --border rounded --border-foreground 63 --padding "0 2" "SalesAI worktree setup" || printf 'SalesAI worktree setup\n'
-    fi
-    printf '  %s [%d/%d] %s — %s\n' "$( (( current_step + 1 == ${#STEPS[@]} )) && echo "✓" || echo "▶" )" "$((current_step + 1))" "${#STEPS[@]}" "${STEPS[$current_step]}" "$current_line"
-    return
-  fi
-
-  tput clear 2>/dev/null || printf '\033[2J\033[H'
-
+say_header() {
   if have gum; then
     gum style --border rounded --border-foreground 63 --padding "0 2" --margin "0 0 1 0" \
       "SalesAI worktree setup" \
-      "$(printf 'Step %d of %d' "$((current_step + 1))" "${#STEPS[@]}")"
-    gum style --foreground 212 --bold "› $current_line"
-    printf '\n'
+      "Deterministic local setup — no agent handoff"
   else
     printf 'SalesAI worktree setup\n\n'
-    printf '  %s\n\n' "$current_line"
   fi
-
-  local i label mark line
-  for i in "${!STEPS[@]}"; do
-    label="${STEPS[$i]}"
-    if (( i < current_step )); then
-      mark="✓"; line="  $mark [$((i+1))/${#STEPS[@]}] $label"
-      have gum && gum style --foreground 42 "$line" || printf '%s\n' "$line"
-    elif (( i == current_step )); then
-      mark="▶"; line="  $mark [$((i+1))/${#STEPS[@]}] $label"
-      have gum && gum style --foreground 214 --bold "$line" || printf '%s\n' "$line"
-    else
-      mark="·"; line="  $mark [$((i+1))/${#STEPS[@]}] $label"
-      have gum && gum style --foreground 245 "$line" || printf '%s\n' "$line"
-    fi
-  done
-  printf '\n'
 }
 
-step() { current_step="$1"; current_line="$2"; render; }
-run_live() {
+step_start() {
+  local label="$1"
+  if have gum; then
+    gum style --foreground 245 "○ $label"
+  else
+    printf '○ %s\n' "$label"
+  fi
+}
+
+step_done() {
+  local label="$1" detail="${2:-}"
+  if have gum; then
+    gum style --foreground 42 "● $label"
+    [[ -n "$detail" ]] && gum style --foreground 245 "  $detail"
+  else
+    printf '● %s\n' "$label"
+    [[ -n "$detail" ]] && printf '  %s\n' "$detail"
+  fi
+}
+
+step_fail() {
+  local label="$1" detail="${2:-}"
+  if have gum; then
+    gum style --foreground 196 --bold "✕ $label"
+    [[ -n "$detail" ]] && gum style --foreground 196 "  $detail"
+  else
+    printf '✕ %s\n' "$label"
+    [[ -n "$detail" ]] && printf '  %s\n' "$detail"
+  fi
+}
+
+last_output_line() { grep -v '^$' "$status_file" | tail -1 | cut -c1-180 || true; }
+
+run_quiet() {
   local label="$1"; shift
+  step_start "$label"
   : > "$status_file"
-  current_line="$label: $*"; render
-  ("$@" >"$status_file" 2>&1) &
-  local pid=$!
-  local previous_last=""
-  while kill -0 "$pid" 2>/dev/null; do
-    local last
-    last="$(grep -v '^$' "$status_file" | tail -1 || true)"
-    if [[ -n "$last" && "$last" != "$previous_last" ]]; then
-      previous_last="$last"
-      current_line="$label: $last"
-      render
-    elif [[ -t 1 ]]; then
-      render
-    fi
-    sleep 0.5
-  done
-  wait "$pid" || { current_line="$label failed. Last output: $(tail -20 "$status_file" | tr '\n' ' ' | cut -c1-220)"; render; echo; tail -80 "$status_file"; exit 1; }
+  if "$@" >"$status_file" 2>&1; then
+    local last; last="$(last_output_line)"
+    step_done "$label" "$last"
+  else
+    local last; last="$(last_output_line)"
+    step_fail "$label" "${last:-Command failed: $*}"
+    printf '\nLast command output:\n'
+    tail -80 "$status_file"
+    exit 1
+  fi
 }
 
 copy_local_files() {
@@ -128,65 +105,65 @@ copy_local_files() {
 }
 
 create_wt() {
-  local input="${1:-}" key summary issue_type branch path main existing
+  local input="${1:-}" key summary issue_type branch path main existing copied_detail
   [[ -z "$input" ]] && { echo "Usage: $0 create <Jira URL/key>"; exit 2; }
   main="$(main_root)"
   key="$(extract_key "$input")"
   [[ -z "$key" ]] && { echo "No Jira key found in: $input"; exit 2; }
 
-  step 0 "Reading $key from Jira…"
+  say_header
+
+  step_start "Read Jira ticket"
   summary="$(jira_summary "$key")"
   issue_type="$(jira_type "$key")"
   [[ -z "$summary" ]] && summary="worktree"
+  step_done "Read Jira ticket" "$key — $summary"
 
-  step 1 "Resolved $key — $summary"
+  step_start "Resolve branch and target path"
   branch="$(branch_type_for "$issue_type $summary")/$key-$(slugify "$summary")"
   path="$WORKTREES_DIR/$key"
+  step_done "Resolve branch and target path" "$branch → $path"
+
   existing="$(git worktree list --porcelain | awk -v p="$path" 'BEGIN{found=0} /^worktree /{found=($0=="worktree " p)} found && /^branch /{print p; exit}')"
   if [[ -n "$existing" || -d "$path/.git" || -f "$path/.git" ]]; then
-    current_step=8; current_line="Existing worktree found: $path"; render
+    step_done "Use existing worktree" "$path"
     copy_path "$path"
-    echo "cd $path"
+    printf '\ncd %s\n' "$path"
     return 0
   fi
 
   mkdir -p "$WORKTREES_DIR"
-  step 2 "Fetching origin/${BASE_BRANCH}…"
-  run_live "git fetch" git -C "$main" fetch origin "$BASE_BRANCH" --prune
+  run_quiet "Fetch origin/${BASE_BRANCH}" git -C "$main" fetch origin "$BASE_BRANCH" --prune
 
-  step 3 "Creating ${branch} at ${path}…"
   if git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
-    run_live "git worktree add" git -C "$main" worktree add "$path" "$branch"
+    run_quiet "Create git worktree" git -C "$main" worktree add "$path" "$branch"
   elif git -C "$main" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-    run_live "git worktree add" git -C "$main" worktree add -b "$branch" "$path" "origin/$branch"
+    run_quiet "Create git worktree" git -C "$main" worktree add -b "$branch" "$path" "origin/$branch"
   else
-    run_live "git worktree add" git -C "$main" worktree add -b "$branch" "$path" "origin/${BASE_BRANCH}"
+    run_quiet "Create git worktree" git -C "$main" worktree add -b "$branch" "$path" "origin/${BASE_BRANCH}"
     git -C "$path" branch --unset-upstream 2>/dev/null || true
   fi
 
-  step 4 "Copying local ignored config/env files…"
+  step_start "Hydrate local files"
   copy_local_files "$main" "$path" >"$status_file" 2>&1 || true
-  current_line="Hydrated: $(tr '\n' ', ' < "$status_file" | sed 's/, $//' || true)"
-  [[ "$current_line" = "Hydrated: " ]] && current_line="No local files needed copying"
-  render
+  copied_detail="$(tr '\n' ', ' < "$status_file" | sed 's/, $//' || true)"
+  [[ -z "$copied_detail" ]] && copied_detail="No local files needed copying"
+  step_done "Hydrate local files" "$copied_detail"
 
-  step 5 "Running npm install…"
-  run_live "npm install" npm --prefix "$path" install
+  run_quiet "Install dependencies" npm --prefix "$path" install
   if git -C "$path" status --short -- package-lock.json | grep -q .; then git -C "$path" restore package-lock.json || true; fi
 
-  step 6 "Running npm run dev:api-client…"
-  run_live "api client" bash -lc "cd '$path' && npm run dev:api-client"
+  run_quiet "Generate API client" bash -lc "cd '$path' && npm run dev:api-client"
 
-  step 7 "Checking node_modules and Nx wrapper…"
-  [[ -d "$path/node_modules" ]] || { echo "Missing node_modules"; exit 1; }
-  [[ -f "$path/.nx/nxw.js" ]] || { echo "Missing .nx/nxw.js"; exit 1; }
-  render
+  step_start "Verify readiness"
+  [[ -d "$path/node_modules" ]] || { step_fail "Verify readiness" "Missing node_modules"; exit 1; }
+  [[ -f "$path/.nx/nxw.js" ]] || { step_fail "Verify readiness" "Missing .nx/nxw.js"; exit 1; }
+  step_done "Verify readiness" "node_modules and .nx/nxw.js present"
 
-  step 8 "Copying path to clipboard…"
+  step_start "Copy path"
   copy_path "$path"
-  current_line="Ready: $path"
-  render
-  printf 'cd %s\n' "$path"
+  step_done "Copy path" "$path"
+  printf '\ncd %s\n' "$path"
 }
 
 case "$mode" in
