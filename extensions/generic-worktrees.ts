@@ -6,6 +6,7 @@ import path from "node:path";
 const DEFAULT_BASE_BRANCH = process.env.PI_WORKTREE_BASE_BRANCH || "main";
 const SALES_AI_MAIN = path.join(process.env.HOME || "/Users/jaren", "Documents/programming/salesai");
 const SALES_AI_WORKTREES = path.join(process.env.HOME || "/Users/jaren", "Documents/programming/salesai-worktrees");
+const SALES_AI_WORKTREE_SCRIPT = path.join(process.env.HOME || "/Users/jaren", ".pi/agent/bin/salesai-worktree.sh");
 
 type Worktree = { path: string; branch: string; head?: string; bare?: boolean };
 type JiraInfo = { key: string; summary?: string; issueType?: string };
@@ -167,8 +168,20 @@ async function createWorktree(ctx: any, input: string) {
   const mainRoot = mainRepoRoot(ctx.cwd);
   const ticketKey = extractTicketKey(input);
   const salesAi = isSalesAiRepo(mainRoot) && ticketKey;
-  const jiraInfo = salesAi ? fetchJiraInfo(mainRoot, ticketKey) : null;
-  const branch = salesAi && jiraInfo ? salesAiBranchFor(jiraInfo) : sanitizeBranchName(input);
+  if (salesAi) {
+    ctx.ui.notify("Launching deterministic SalesAI worktree CLI…", "info");
+    const result = spawnSync("bash", [SALES_AI_WORKTREE_SCRIPT, "create", input], {
+      cwd: mainRoot,
+      stdio: "inherit",
+      env: process.env,
+    });
+    if (result.status !== 0) {
+      ctx.ui.notify(`SalesAI worktree setup failed with exit code ${result.status ?? "unknown"}.`, "error");
+    }
+    return;
+  }
+
+  const branch = sanitizeBranchName(input);
 
   if (!branch) {
     ctx.ui.notify("Provide a branch name, ticket key, PR URL, or other branch-like identifier.", "warning");
