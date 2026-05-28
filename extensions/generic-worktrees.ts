@@ -169,7 +169,6 @@ async function createWorktree(ctx: any, input: string) {
   const ticketKey = extractTicketKey(input);
   const salesAi = isSalesAiRepo(mainRoot) && ticketKey;
   if (salesAi) {
-    ctx.ui.notify("Launching deterministic SalesAI worktree CLI…", "info");
     const result = spawnSync("bash", [SALES_AI_WORKTREE_SCRIPT, "create", input], {
       cwd: mainRoot,
       stdio: "inherit",

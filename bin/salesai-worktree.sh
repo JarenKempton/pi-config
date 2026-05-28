@@ -46,7 +46,9 @@ STEP_STATUS=()
 for _ in "${STEPS[@]}"; do STEP_STATUS+=("pending"); done
 CURRENT_OUTPUT="starting"
 RENDERED=0
-BLOCK_LINES=$(( ${#STEPS[@]} + 4 ))
+# Header + current line + blank separator + one line per step.
+# Keep this exact; if it is too high/low, old checklist rows remain on screen.
+BLOCK_LINES=$(( ${#STEPS[@]} + 3 ))
 status_file="$(mktemp -t salesai-worktree-status.XXXXXX)"
 trap 'rm -f "$status_file"' EXIT
 
@@ -58,8 +60,10 @@ fi
 
 truncate_line() {
   local text="$1" width
-  width="$(tput cols 2>/dev/null || echo 120)"
-  width=$(( width > 20 ? width - 4 : width ))
+  width="$(tput cols 2>/dev/null || echo 100)"
+  # Pi's embedded terminal can wrap a little before tput's reported width.
+  # Leave a large safety margin so the Current line is always one physical row.
+  width=$(( width > 50 ? width - 20 : width - 4 ))
   text="$(echo "$text" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
   if (( ${#text} > width )); then
     printf '%s…' "${text:0:$((width-1))}"
