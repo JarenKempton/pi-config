@@ -199,7 +199,7 @@ export default function genericWorktrees(pi: ExtensionAPI) {
   async function createWorktree(ctx: any, input: string) {
     if (isSalesAiRepo(ctx.cwd)) {
       ctx.ui.notify(`Handing off to SalesAI /worktree flow for:\n${input}\n\nYou should see the normal agent tool/progress updates next.`, "info");
-      pi.sendUserMessage(`/worktree ${input}`);
+      await ctx.sendUserMessage(`/worktree ${input}`);
       return;
     }
 
