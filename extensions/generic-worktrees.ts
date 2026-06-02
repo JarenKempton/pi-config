@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
@@ -38,6 +38,26 @@ function tryRun(command: string, args: string[], cwd: string): { ok: true; stdou
       error: [anyError.stderr?.toString(), anyError.stdout?.toString(), anyError.message].filter(Boolean).join("\n").trim(),
     };
   }
+}
+
+function runAsync(command: string, args: string[], cwd: string): Promise<{ ok: true; stdout: string } | { ok: false; error: string }> {
+  return new Promise((resolve) => {
+    execFile(command, args, { cwd, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (!error) {
+        resolve({ ok: true, stdout: stdout.trimEnd() });
+        return;
+      }
+
+      resolve({
+        ok: false,
+        error: [stderr, stdout, error.message].filter(Boolean).join("\n").trim(),
+      });
+    });
+  });
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function repoRoot(cwd: string): string {
@@ -173,13 +193,42 @@ function worktreesDirFor(mainRepoPath: string, config: WorktreeConfig): string {
 
 function renderProgress(ctx: ExtensionContext, log: string, steps: ProgressStep[]) {
   if (!ctx.hasUI) return;
-  const icon = (status: StepStatus) => {
-    if (status === "done") return "✓";
-    if (status === "active") return "→";
-    if (status === "error") return "✗";
-    return "○";
-  };
-  ctx.ui.setWidget(WIDGET_ID, [log, "", ...steps.map((step) => `${icon(step.status)} ${step.label}`)]);
+  ctx.ui.setStatus(WIDGET_ID, log);
+  ctx.ui.setWidget(WIDGET_ID, (_tui, theme) => {
+    const icon = (status: StepStatus) => {
+      if (status === "done") return theme.fg("success", "✓");
+      if (status === "active") return theme.fg("accent", "→");
+      if (status === "error") return theme.fg("error", "✗");
+      return theme.fg("muted", "○");
+    };
+    const label = (step: ProgressStep) => {
+      if (step.status === "done") return theme.fg("success", step.label);
+      if (step.status === "active") return theme.fg("accent", step.label);
+      if (step.status === "error") return theme.fg("error", step.label);
+      return theme.fg("muted", step.label);
+    };
+    const logColor = steps.some((step) => step.status === "error")
+      ? "error"
+      : steps.every((step) => step.status === "done")
+        ? "success"
+        : "accent";
+
+    return {
+      invalidate() {},
+      render() {
+        return [
+          theme.fg(logColor, log),
+          "",
+          ...steps.map((step) => `${icon(step.status)} ${label(step)}`),
+        ];
+      },
+    };
+  });
+}
+
+async function showProgress(ctx: ExtensionContext, log: string, steps: ProgressStep[]) {
+  renderProgress(ctx, log, steps);
+  await nextFrame();
 }
 
 function mark(steps: ProgressStep[], index: number, status: StepStatus) {
@@ -320,8 +369,8 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
   ];
 
   mark(steps, 0, "active");
-  renderProgress(ctx, `Removing ${wt.path}…`, steps);
-  const removed = tryRun("git", ["worktree", "remove", ...(status ? ["--force"] : []), wt.path], root);
+  await showProgress(ctx, `Removing ${wt.path}…`, steps);
+  const removed = await runAsync("git", ["worktree", "remove", ...(status ? ["--force"] : []), wt.path], root);
   if (removed.ok === false) {
     fail(ctx, steps, 0, removed.error || `Failed to remove ${wt.path}`);
     return;
@@ -330,15 +379,15 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
   mark(steps, 0, "done");
 
   mark(steps, 1, "active");
-  renderProgress(ctx, "Pruning git worktree metadata…", steps);
-  tryRun("git", ["worktree", "prune"], root);
+  await showProgress(ctx, "Pruning git worktree metadata…", steps);
+  await runAsync("git", ["worktree", "prune"], root);
   mark(steps, 1, "done");
 
   mark(steps, 2, "active");
-  renderProgress(ctx, "Deleting branch refs…", steps);
+  await showProgress(ctx, "Deleting branch refs…", steps);
   let branchNote = "";
   if (shouldDeleteBranch) {
-    const deleted = tryRun("git", ["branch", "-D", wt.branch], root);
+    const deleted = await runAsync("git", ["branch", "-D", wt.branch], root);
     if (deleted.ok) {
       branchNote += `\nDeleted local branch ${wt.branch}.`;
     } else {
@@ -346,10 +395,10 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
     }
 
     if (remoteTrackingRefExists(root, config, wt.branch)) {
-      tryRun("git", ["branch", "-dr", remoteRef(config.remote, wt.branch)], root);
+      await runAsync("git", ["branch", "-dr", remoteRef(config.remote, wt.branch)], root);
     }
     if (shouldDeleteRemote) {
-      const deletedRemote = tryRun("git", ["push", config.remote, "--delete", wt.branch], root);
+      const deletedRemote = await runAsync("git", ["push", config.remote, "--delete", wt.branch], root);
       if (deletedRemote.ok) {
         branchNote += `\nDeleted remote branch ${remoteRef(config.remote, wt.branch)}.`;
       } else {
@@ -360,7 +409,7 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
   mark(steps, 2, "done");
 
   mark(steps, 3, "active");
-  renderProgress(ctx, "Verifying cleanup…", steps);
+  await showProgress(ctx, "Verifying cleanup…", steps);
   const stillListed = worktrees(root).some((item) => path.resolve(item.path) === path.resolve(wt.path));
   if (stillListed || existsSync(wt.path)) {
     fail(ctx, steps, 3, `Cleanup incomplete for ${wt.path}`);
@@ -390,7 +439,16 @@ export default function genericWorktrees(pi: ExtensionAPI) {
       }
 
       const create = "＋ Create worktree";
-      const selected = await ctx.ui.select("Git worktrees", [...list.map((wt) => label(wt, currentPath, primaryPath)), create]);
+      const copyPrefix = "📋 Copy path — ";
+      const deletePrefix = "🗑 Delete — ";
+      const options = [
+        create,
+        ...list.flatMap((wt) => {
+          const itemLabel = label(wt, currentPath, primaryPath);
+          return [`${copyPrefix}${itemLabel}`, `${deletePrefix}${itemLabel}`];
+        }),
+      ];
+      const selected = await ctx.ui.select("Git worktrees", options);
       if (!selected) return;
 
       if (selected === create) {
@@ -399,14 +457,18 @@ export default function genericWorktrees(pi: ExtensionAPI) {
         return;
       }
 
-      const wt = list.find((item) => label(item, currentPath, primaryPath) === selected);
+      const selectedLabel = selected.startsWith(copyPrefix)
+        ? selected.slice(copyPrefix.length)
+        : selected.startsWith(deletePrefix)
+          ? selected.slice(deletePrefix.length)
+          : "";
+      const wt = list.find((item) => label(item, currentPath, primaryPath) === selectedLabel);
       if (!wt) return;
 
-      const action = await ctx.ui.select(`Worktree: ${path.basename(wt.path)}`, ["Copy path", "Delete worktree", "Cancel"]);
-      if (action === "Copy path") {
+      if (selected.startsWith(copyPrefix)) {
         copyPath(wt.path);
         ctx.ui.notify(`Copied path to clipboard:\n${wt.path}`, "info");
-      } else if (action === "Delete worktree") {
+      } else if (selected.startsWith(deletePrefix)) {
         await deleteWorktree(ctx, wt);
       }
     },
