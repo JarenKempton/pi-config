@@ -128,7 +128,7 @@ function upstreamFor(cwd: string, branch: string): string | undefined {
   return result.ok && result.stdout.trim() ? result.stdout.trim() : undefined;
 }
 
-function ensureBranchTracksOwnRemote(root: string, branch: string, config: WorktreeConfig) {
+async function ensureBranchTracksOwnRemote(root: string, branch: string, config: WorktreeConfig) {
   if (!branch || branch === "(detached)" || branch === config.baseBranch) return;
 
   const ownRemote = remoteRef(config.remote, branch);
@@ -136,16 +136,16 @@ function ensureBranchTracksOwnRemote(root: string, branch: string, config: Workt
   if (upstream === ownRemote) return;
 
   if (remoteBranchExists(root, config.remote, branch)) {
-    tryRun("git", ["branch", "--set-upstream-to", ownRemote, branch], root);
+    await runAsync("git", ["branch", "--set-upstream-to", ownRemote, branch], root);
     return;
   }
 
   if (config.pushNewBranches) {
-    const pushed = tryRun("git", ["push", "--set-upstream", config.remote, branch], root);
+    const pushed = await runAsync("git", ["push", "--set-upstream", config.remote, branch], root);
     if (pushed.ok) return;
   }
 
-  if (upstream) tryRun("git", ["branch", "--unset-upstream", branch], root);
+  if (upstream) await runAsync("git", ["branch", "--unset-upstream", branch], root);
 }
 
 function sanitizeBranchName(input: string): string {
@@ -255,7 +255,7 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   ];
 
   mark(steps, 0, "active");
-  renderProgress(ctx, "Validating worktree request…", steps);
+  await showProgress(ctx, "Validating worktree request…", steps);
   if (!branch) {
     fail(ctx, steps, 0, "Provide a branch name, ticket key, PR URL, or other branch-like identifier.");
     return;
@@ -275,12 +275,12 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   mark(steps, 0, "done");
 
   mark(steps, 1, "active");
-  renderProgress(ctx, `Fetching ${config.remote}…`, steps);
-  tryRun("git", ["fetch", config.remote, "--prune"], root);
+  await showProgress(ctx, `Fetching ${config.remote}…`, steps);
+  await runAsync("git", ["fetch", config.remote, "--prune"], root);
   mark(steps, 1, "done");
 
   mark(steps, 2, "active");
-  renderProgress(ctx, `Creating ${branch} in ${targetPath}…`, steps);
+  await showProgress(ctx, `Creating ${branch} in ${targetPath}…`, steps);
   let args: string[];
   if (branchExists(root, branch)) {
     args = ["worktree", "add", targetPath, branch];
@@ -290,7 +290,7 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
     args = ["worktree", "add", "-b", branch, targetPath, remoteRef(config.remote, config.baseBranch)];
   }
 
-  const created = tryRun("git", args, root);
+  const created = await runAsync("git", args, root);
   if (created.ok === false) {
     fail(ctx, steps, 2, created.error || `Failed to create worktree ${branch}`);
     return;
@@ -298,8 +298,8 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   mark(steps, 2, "done");
 
   mark(steps, 3, "active");
-  renderProgress(ctx, `Ensuring ${branch} does not track ${remoteRef(config.remote, config.baseBranch)}…`, steps);
-  ensureBranchTracksOwnRemote(root, branch, config);
+  await showProgress(ctx, `Ensuring ${branch} tracks ${remoteRef(config.remote, branch)}…`, steps);
+  await ensureBranchTracksOwnRemote(root, branch, config);
   const upstream = upstreamFor(root, branch);
   if (upstream === remoteRef(config.remote, config.baseBranch)) {
     fail(ctx, steps, 3, `Refusing to leave ${branch} tracking ${remoteRef(config.remote, config.baseBranch)}.`);
@@ -308,7 +308,7 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   mark(steps, 3, "done");
 
   mark(steps, 4, "active");
-  renderProgress(ctx, "Copying path to clipboard…", steps);
+  await showProgress(ctx, "Copying path to clipboard…", steps);
   copyPath(targetPath);
   mark(steps, 4, "done");
   renderProgress(ctx, `Worktree ready: ${targetPath}`, steps);
@@ -349,16 +349,11 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
   const status = statusShort(wt.path);
   const shouldDeleteBranch = Boolean(config.deleteLocalBranches && wt.branch && wt.branch !== "(detached)" && wt.branch !== config.baseBranch);
   const shouldDeleteRemote = Boolean(shouldDeleteBranch && config.deleteRemoteBranches && remoteBranchExists(root, config.remote, wt.branch));
-  const summary = [
-    `Remove worktree folder: ${wt.path}`,
-    "Prune git worktree metadata",
-    shouldDeleteBranch ? `Delete local branch: ${wt.branch}` : undefined,
-    shouldDeleteBranch && remoteTrackingRefExists(root, config, wt.branch) ? `Delete local remote-tracking ref: ${remoteRef(config.remote, wt.branch)}` : undefined,
-    shouldDeleteRemote ? `Delete remote branch: ${remoteRef(config.remote, wt.branch)}` : undefined,
-    status ? `\nLocal changes will be discarded:\n${status}` : undefined,
-  ].filter(Boolean).join("\n");
+  const summary = status
+    ? `${path.basename(wt.path)} has local changes. Delete it and discard those changes?`
+    : `Delete ${path.basename(wt.path)}?`;
 
-  const ok = await ctx.ui.confirm("Delete worktree and clean local refs?", summary);
+  const ok = await ctx.ui.confirm("Delete worktree?", summary);
   if (!ok) return;
 
   const steps: ProgressStep[] = [
@@ -439,16 +434,7 @@ export default function genericWorktrees(pi: ExtensionAPI) {
       }
 
       const create = "＋ Create worktree";
-      const copyPrefix = "📋 Copy path — ";
-      const deletePrefix = "🗑 Delete — ";
-      const options = [
-        create,
-        ...list.flatMap((wt) => {
-          const itemLabel = label(wt, currentPath, primaryPath);
-          return [`${copyPrefix}${itemLabel}`, `${deletePrefix}${itemLabel}`];
-        }),
-      ];
-      const selected = await ctx.ui.select("Git worktrees", options);
+      const selected = await ctx.ui.select("Git worktrees", [...list.map((wt) => label(wt, currentPath, primaryPath)), create]);
       if (!selected) return;
 
       if (selected === create) {
@@ -457,18 +443,14 @@ export default function genericWorktrees(pi: ExtensionAPI) {
         return;
       }
 
-      const selectedLabel = selected.startsWith(copyPrefix)
-        ? selected.slice(copyPrefix.length)
-        : selected.startsWith(deletePrefix)
-          ? selected.slice(deletePrefix.length)
-          : "";
-      const wt = list.find((item) => label(item, currentPath, primaryPath) === selectedLabel);
+      const wt = list.find((item) => label(item, currentPath, primaryPath) === selected);
       if (!wt) return;
 
-      if (selected.startsWith(copyPrefix)) {
+      const action = await ctx.ui.select(`Worktree: ${path.basename(wt.path)}`, ["Copy path", "Delete worktree", "Cancel"]);
+      if (action === "Copy path") {
         copyPath(wt.path);
         ctx.ui.notify(`Copied path to clipboard:\n${wt.path}`, "info");
-      } else if (selected.startsWith(deletePrefix)) {
+      } else if (action === "Delete worktree") {
         await deleteWorktree(ctx, wt);
       }
     },
@@ -491,6 +473,9 @@ export default function genericWorktrees(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    if (ctx.hasUI) ctx.ui.setWidget(WIDGET_ID, undefined);
+    if (ctx.hasUI) {
+      ctx.ui.setWidget(WIDGET_ID, undefined);
+      ctx.ui.setStatus(WIDGET_ID, undefined);
+    }
   });
 }
