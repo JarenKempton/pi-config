@@ -97,6 +97,52 @@ Keep machine-local/private files outside the repo, for example:
 
    Keep `~/.pi/agent/auth.json` local. Do not commit auth files or API keys.
 
+## Worktrees command
+
+The shared `/worktrees`, `/create-worktree`, and `/delete-worktree` commands live in:
+
+```text
+extensions/generic-worktrees.ts
+```
+
+Default behavior:
+
+- Creates worktrees under `../worktrees` relative to the primary checkout.
+- Creates new local branches from `origin/main` by default.
+- Immediately pushes new branches with `git push --set-upstream origin <branch>`, so feature branches track `origin/<branch>` instead of `origin/main`.
+- Deletes worktrees with one confirmation, then removes the folder, prunes git worktree metadata, deletes the local branch, and deletes the local remote-tracking ref.
+- Does **not** delete remote branches unless configured to do so.
+
+Per-project overrides belong in one of these files in the repo you are working on:
+
+```text
+.pi/worktrees.json
+.pi/worktrees.config.json
+```
+
+Example:
+
+```json
+{
+  "baseBranch": "main",
+  "remote": "origin",
+  "worktreesDir": "../worktrees",
+  "pushNewBranches": true,
+  "deleteLocalBranches": true,
+  "deleteRemoteBranches": false
+}
+```
+
+Use that project-local config for organization-specific behavior. Keep `generic-worktrees.ts` abstract and only change it when the common workflow itself is wrong.
+
+Environment variables are also supported for portable defaults:
+
+- `PI_WORKTREE_BASE_BRANCH`
+- `PI_WORKTREE_REMOTE`
+- `PI_WORKTREE_PUSH_NEW_BRANCHES=0`
+- `PI_WORKTREE_DELETE_LOCAL_BRANCHES=0`
+- `PI_WORKTREE_DELETE_REMOTE_BRANCHES=1`
+
 ## Updating this config
 
 Inside Pi, use the package commands from `extensions/pi-config-git.ts`:
