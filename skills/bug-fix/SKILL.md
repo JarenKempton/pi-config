@@ -1,6 +1,6 @@
 ---
 name: bug-fix
-description: Fix bugs with a regression-first TDD loop: confirm repro, write failing tests before production changes, report failures, then implement only after approval. Use when working on bug tickets, debugging broken behavior, fixing regressions, or when the user asks for a bug fix.
+description: "Fix bugs with a regression-first TDD loop: confirm repro, write failing tests before production changes, report failures, then implement only after approval. Use when working on bug tickets, debugging broken behavior, fixing regressions, or when the user asks for a bug fix."
 ---
 
 # Bug Fix
