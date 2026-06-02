@@ -182,6 +182,10 @@ function copyPath(value: string) {
   spawnSync("pbcopy", { input: value, encoding: "utf8" });
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function statusShort(cwd: string): string {
   return run("git", ["status", "--short"], cwd);
 }
@@ -309,10 +313,11 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
 
   mark(steps, 4, "active");
   await showProgress(ctx, "Copying path to clipboard…", steps);
-  copyPath(targetPath);
+  const cdCommand = `cd ${shellQuote(targetPath)}`;
+  copyPath(cdCommand);
   mark(steps, 4, "done");
-  renderProgress(ctx, `Worktree ready: ${targetPath}`, steps);
-  ctx.ui.notify(`Worktree ready and path copied:\n\ncd ${targetPath}\n\nUpstream: ${upstream ?? "none"}`, "success");
+  renderProgress(ctx, `Worktree ready. Paste: ${cdCommand}`, steps);
+  ctx.ui.notify(`Worktree ready. CD command copied:\n\n${cdCommand}\n\nUpstream: ${upstream ?? "none"}`, "success");
 }
 
 function findWorktree(root: string, selected: Worktree | string): Worktree | undefined {
