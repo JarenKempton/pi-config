@@ -16,6 +16,7 @@ This path is a symlink to Pi's installed git package checkout:
 
 Rules:
 
+- Before installing packages, upgrading tools, changing global configuration, or otherwise mutating the host system outside the current repository, explain the intended command/change and ask for explicit user approval. This is especially important for global package managers such as `npm install -g`, Homebrew, pipx/pip, system browser tooling, shell profile edits, and credential/auth tooling.
 - Create personal skills in `~/.pi/agent/pi-config/skills/<skill-name>/SKILL.md`.
 - Create personal extensions in `~/.pi/agent/pi-config/extensions/<extension-name>.ts`.
 - Create personal prompt templates in `~/.pi/agent/pi-config/prompts/<name>.md`.
