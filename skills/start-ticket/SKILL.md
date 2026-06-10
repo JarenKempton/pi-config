@@ -46,11 +46,12 @@ Never create SalesAI worktrees in `~/Documents/programming/worktrees`, never use
    git status --short
    git branch --show-current
    ```
-3. If no ticket key/ID was provided in the prompt, infer it from the current branch name returned by `git branch --show-current`:
-   - Look for common ticket key formats such as `ABC-123`, `CSU-4213`, or other uppercase project-key plus number patterns anywhere in the branch name.
-   - Accept keys embedded in prefixes/suffixes, for example `feature/CSU-4213-phone-number-search` -> `CSU-4213`.
-   - If multiple plausible keys are found, ask the user which one to use before continuing.
-   - If no ticket key can be inferred, ask the user for the ticket key/URL before fetching ticket context.
+3. If no ticket key/ID was provided in the prompt, infer it from the current branch name returned by `git branch --show-current`. This is the default path for requests like “start this ticket”, “plan this”, or “what gives from here”; do not ask for a ticket key first when the current branch already contains one.
+   - Look for common ticket key formats such as `ABC-123`, `CSU-4213`, or project-key plus number patterns anywhere in the branch name.
+   - Match ticket keys case-insensitively and normalize them to uppercase before using them with Jira/GitHub. For example, `browse-csu-4733`, `feature/CSU-4213-phone-number-search`, and `fix/csu-4215-reminder-enable-configured-actions` all contain valid keys.
+   - Accept keys embedded in prefixes/suffixes, for example `feature/CSU-4213-phone-number-search` -> `CSU-4213` and `browse-csu-4733` -> `CSU-4733`.
+   - If multiple plausible keys are found, prefer the first ticket-like key in the branch name unless the prompt names a different key; only ask the user when the keys conflict or ambiguity would change the ticket being fetched.
+   - If the branch does not contain a ticket key, then ask the user for the ticket key/URL before fetching ticket context.
 4. If branch/worktree creation is requested and the tree is clean, sync the base branch and create the requested workspace shape:
    - Plain branch in the current worktree:
      ```bash
@@ -111,7 +112,7 @@ Never create SalesAI worktrees in `~/Documents/programming/worktrees`, never use
    - Reference this file before implementing, validating, committing, or summarizing ticket work.
 10. Present the recorded plan with:
    - plan file path
-   - ticket key source: prompt-provided or branch-inferred
+   - ticket key source: prompt-provided or branch-inferred, including the current branch name when inferred
    - goal
    - relevant context found
    - proposed implementation steps
