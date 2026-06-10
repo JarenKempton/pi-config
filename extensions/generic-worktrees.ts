@@ -100,10 +100,12 @@ function primaryWorktreePath(cwd: string): string {
 
 function loadConfig(cwd: string): WorktreeConfig {
   const root = repoRoot(cwd);
-  const candidates = [
-    path.join(root, ".pi", "worktrees.json"),
-    path.join(root, ".pi", "worktrees.config.json"),
-  ];
+  const primaryPath = primaryWorktreePath(root);
+  const configRoots = Array.from(new Set([root, primaryPath]));
+  const candidates = configRoots.flatMap((configRoot) => [
+    path.join(configRoot, ".pi", "worktrees.json"),
+    path.join(configRoot, ".pi", "worktrees.config.json"),
+  ]);
 
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue;
@@ -170,6 +172,14 @@ function isValidBranchName(cwd: string, branch: string): boolean {
 
 function folderNameFor(branch: string): string {
   return branch.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function ticketKeyFrom(input: string): string | undefined {
+  return input.match(/[A-Z][A-Z0-9]+-\d+/i)?.[0]?.toUpperCase();
+}
+
+function targetFolderNameFor(input: string, branch: string): string {
+  return ticketKeyFrom(input) ?? folderNameFor(branch);
 }
 
 function label(wt: Worktree, currentPath: string, primaryPath: string): string {
@@ -292,7 +302,7 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   }
 
   const targetBaseDir = worktreesDirFor(primaryPath, config);
-  const targetPath = path.join(targetBaseDir, folderNameFor(branch));
+  const targetPath = path.join(targetBaseDir, targetFolderNameFor(input, branch));
   if (existsSync(targetPath)) {
     fail(ctx, steps, 0, `Target path already exists: ${targetPath}`);
     return;
@@ -374,10 +384,12 @@ function findWorktree(root: string, selected: Worktree | string): Worktree | und
   const list = worktrees(root);
   if (typeof selected !== "string") return selected;
   const sanitized = sanitizeBranchName(selected);
+  const ticketKey = ticketKeyFrom(selected);
   return list.find((item) =>
     item.path === selected ||
     item.branch === sanitized ||
-    path.basename(item.path) === folderNameFor(sanitized),
+    path.basename(item.path) === folderNameFor(sanitized) ||
+    Boolean(ticketKey && path.basename(item.path).toUpperCase() === ticketKey),
   );
 }
 
