@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { execFile, execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 type Worktree = { path: string; branch: string; head?: string; bare?: boolean };
@@ -13,6 +13,9 @@ type WorktreeConfig = {
   pushNewBranches: boolean;
   deleteLocalBranches: boolean;
   deleteRemoteBranches: boolean;
+  copyFromPrimary?: string[];
+  bootstrapCommands?: string[];
+  verifyPaths?: string[];
 };
 
 const WIDGET_ID = "generic-worktrees-progress";
@@ -195,6 +198,23 @@ function worktreesDirFor(mainRepoPath: string, config: WorktreeConfig): string {
   return path.isAbsolute(config.worktreesDir) ? config.worktreesDir : path.resolve(mainRepoPath, config.worktreesDir);
 }
 
+function copyConfiguredFiles(sourceRoot: string, targetRoot: string, relativePaths: string[]): string[] {
+  const copied: string[] = [];
+  for (const relativePath of relativePaths) {
+    const from = path.join(sourceRoot, relativePath);
+    const to = path.join(targetRoot, relativePath);
+    if (!existsSync(from) || existsSync(to)) continue;
+    mkdirSync(path.dirname(to), { recursive: true });
+    cpSync(from, to, { recursive: true, errorOnExist: true });
+    copied.push(relativePath);
+  }
+  return copied;
+}
+
+async function runShellCommand(cwd: string, command: string): Promise<{ ok: true; stdout: string } | { ok: false; error: string }> {
+  return runAsync("bash", ["-lc", command], cwd);
+}
+
 function renderProgress(ctx: ExtensionContext, log: string, steps: ProgressStep[]) {
   if (!ctx.hasUI) return;
   ctx.ui.setStatus(WIDGET_ID, log);
@@ -250,11 +270,13 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   const config = loadConfig(ctx.cwd);
   const primaryPath = primaryWorktreePath(root);
   const branch = sanitizeBranchName(input);
+  const hasBootstrap = Boolean(config.copyFromPrimary?.length || config.bootstrapCommands?.length || config.verifyPaths?.length);
   const steps: ProgressStep[] = [
     { label: "Validate branch and paths", status: "pending" },
     { label: `Fetch ${config.remote} and prune stale refs`, status: "pending" },
     { label: "Create isolated worktree branch", status: "pending" },
     { label: "Set upstream to the matching remote branch", status: "pending" },
+    ...(hasBootstrap ? [{ label: "Run project worktree bootstrap", status: "pending" as StepStatus }] : []),
     { label: "Copy worktree path", status: "pending" },
   ];
 
@@ -311,11 +333,39 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   }
   mark(steps, 3, "done");
 
-  mark(steps, 4, "active");
+  let copyPathStepIndex = 4;
+  if (hasBootstrap) {
+    const bootstrapStepIndex = 4;
+    copyPathStepIndex = 5;
+    mark(steps, bootstrapStepIndex, "active");
+    await showProgress(ctx, "Running project worktree bootstrap…", steps);
+
+    const copied = copyConfiguredFiles(primaryPath, targetPath, config.copyFromPrimary ?? []);
+    if (copied.length > 0) await showProgress(ctx, `Copied local files: ${copied.join(", ")}`, steps);
+
+    for (const command of config.bootstrapCommands ?? []) {
+      await showProgress(ctx, `Running: ${command}`, steps);
+      const result = await runShellCommand(targetPath, command);
+      if (!result.ok) {
+        fail(ctx, steps, bootstrapStepIndex, result.error || `Bootstrap command failed: ${command}`);
+        return;
+      }
+    }
+
+    const missing = (config.verifyPaths ?? []).filter((relativePath) => !existsSync(path.join(targetPath, relativePath)));
+    if (missing.length > 0) {
+      fail(ctx, steps, bootstrapStepIndex, `Worktree bootstrap incomplete. Missing: ${missing.join(", ")}`);
+      return;
+    }
+
+    mark(steps, bootstrapStepIndex, "done");
+  }
+
+  mark(steps, copyPathStepIndex, "active");
   await showProgress(ctx, "Copying path to clipboard…", steps);
   const cdCommand = `cd ${shellQuote(targetPath)}`;
   copyPath(cdCommand);
-  mark(steps, 4, "done");
+  mark(steps, copyPathStepIndex, "done");
   renderProgress(ctx, `Worktree ready. Paste: ${cdCommand}`, steps);
   ctx.ui.notify(`Worktree ready. CD command copied:\n\n${cdCommand}\n\nUpstream: ${upstream ?? "none"}`, "success");
 }
