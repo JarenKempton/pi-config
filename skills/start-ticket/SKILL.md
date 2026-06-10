@@ -46,12 +46,11 @@ Never create SalesAI worktrees in `~/Documents/programming/worktrees`, never use
    git status --short
    git branch --show-current
    ```
-3. If no ticket key/ID was provided in the prompt, infer it from the current branch name returned by `git branch --show-current`. This is the default path for requests like “start this ticket”, “plan this”, or “what gives from here”; do not ask for a ticket key first when the current branch already contains one.
-   - Look for common ticket key formats such as `ABC-123`, `CSU-4213`, or project-key plus number patterns anywhere in the branch name.
-   - Match ticket keys case-insensitively and normalize them to uppercase before using them with Jira/GitHub. For example, `browse-csu-4733`, `feature/CSU-4213-phone-number-search`, and `fix/csu-4215-reminder-enable-configured-actions` all contain valid keys.
-   - Accept keys embedded in prefixes/suffixes, for example `feature/CSU-4213-phone-number-search` -> `CSU-4213` and `browse-csu-4733` -> `CSU-4733`.
-   - If multiple plausible keys are found, prefer the first ticket-like key in the branch name unless the prompt names a different key; only ask the user when the keys conflict or ambiguity would change the ticket being fetched.
-   - If the branch does not contain a ticket key, then ask the user for the ticket key/URL before fetching ticket context.
+3. If no ticket key/ID was provided in the prompt, infer it from the current branch name returned by `git branch --show-current` before asking the user.
+   - Match ticket keys case-insensitively anywhere in the branch name and normalize to uppercase, for example `browse-csu-4733` -> `CSU-4733` and `feature/CSU-4213-phone-number-search` -> `CSU-4213`.
+   - If exactly one ticket key is found, use it.
+   - If multiple ticket keys are found, ask which one to use.
+   - If no ticket key is found, ask the user for the ticket key/URL before fetching ticket context.
 4. If branch/worktree creation is requested and the tree is clean, sync the base branch and create the requested workspace shape:
    - Plain branch in the current worktree:
      ```bash
@@ -107,7 +106,8 @@ Never create SalesAI worktrees in `~/Documents/programming/worktrees`, never use
    - If operating from a package subdirectory, use that package's `.pi/plan.md` only when it is the established Pi directory for the current worktree; otherwise use the repository root `.pi/plan.md`.
    - Create the `.pi` directory if needed.
    - Treat this file as the deterministic source of truth for the ticket plan during execution.
-   - Include the ticket key/link, branch, worktree path when applicable, current date, goal, relevant context found, proposed implementation steps, test/validation plan, risks/open questions, and whether to split into multiple branches/PRs.
+   - Include the ticket key/link, branch, worktree path when applicable, current date, goal, relevant context found, proposed solution, implementation steps, test/validation plan, risks/open questions, and whether to split into multiple branches/PRs.
+   - The proposed solution must be concrete enough to approve or reject. Do not stop at “inspect/verify”; state the likely code change or investigation hypothesis based on the ticket context and code research.
    - Update this file when the user approves a changed plan or when meaningful implementation discoveries alter the plan.
    - Reference this file before implementing, validating, committing, or summarizing ticket work.
 10. Present the recorded plan with:
@@ -115,7 +115,7 @@ Never create SalesAI worktrees in `~/Documents/programming/worktrees`, never use
    - ticket key source: prompt-provided or branch-inferred, including the current branch name when inferred
    - goal
    - relevant context found
-   - proposed implementation steps
+   - proposed solution and implementation steps
    - test/validation plan
    - regression-test gate when the ticket is a bug
    - risks and open questions
