@@ -225,9 +225,14 @@ async function runShellCommand(cwd: string, command: string): Promise<{ ok: true
   return runAsync("bash", ["-lc", command], cwd);
 }
 
+function clearProgress(ctx: ExtensionContext) {
+  if (!ctx.hasUI) return;
+  ctx.ui.setWidget(WIDGET_ID, undefined);
+  ctx.ui.setStatus(WIDGET_ID, undefined);
+}
+
 function renderProgress(ctx: ExtensionContext, log: string, steps: ProgressStep[]) {
   if (!ctx.hasUI) return;
-  ctx.ui.setStatus(WIDGET_ID, log);
   ctx.ui.setWidget(WIDGET_ID, (_tui, theme) => {
     const icon = (status: StepStatus) => {
       if (status === "done") return theme.fg("success", "✓");
@@ -376,8 +381,8 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   const cdCommand = `cd ${shellQuote(targetPath)}`;
   copyPath(cdCommand);
   mark(steps, copyPathStepIndex, "done");
-  renderProgress(ctx, `Worktree ready. Paste: ${cdCommand}`, steps);
-  ctx.ui.notify(`Worktree ready. CD command copied:\n\n${cdCommand}\n\nUpstream: ${upstream ?? "none"}`, "success");
+  clearProgress(ctx);
+  ctx.ui.notify(cdCommand, "success");
 }
 
 function findWorktree(root: string, selected: Worktree | string): Worktree | undefined {
@@ -478,7 +483,7 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
     return;
   }
   mark(steps, 3, "done");
-  renderProgress(ctx, `Removed worktree: ${wt.path}`, steps);
+  clearProgress(ctx);
   ctx.ui.notify(`Removed worktree:\n${wt.path}${branchNote}`, "success");
 }
 
@@ -541,8 +546,7 @@ export default function genericWorktrees(pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (ctx.hasUI) {
-      ctx.ui.setWidget(WIDGET_ID, undefined);
-      ctx.ui.setStatus(WIDGET_ID, undefined);
+      clearProgress(ctx);
     }
   });
 }
