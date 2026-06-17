@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { execFile, execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
@@ -16,6 +16,7 @@ type WorktreeConfig = {
   copyFromPrimary?: string[];
   bootstrapCommands?: string[];
   verifyPaths?: string[];
+  verifyCommands?: string[];
 };
 
 const WIDGET_ID = "generic-worktrees-progress";
@@ -166,6 +167,49 @@ function sanitizeBranchName(input: string): string {
     .toLowerCase();
 }
 
+function commandExists(command: string): boolean {
+  return spawnSync("bash", ["-lc", `command -v ${shellQuote(command)} >/dev/null 2>&1`]).status === 0;
+}
+
+function jiraIssueText(cwd: string, ticketKey: string): string | undefined {
+  const commands = [
+    ["acli", ["jira", "workitem", "view", ticketKey]],
+    ["acli", ["jira", "issue", "view", ticketKey]],
+    ["jira", ["issue", "view", ticketKey]],
+  ] as const;
+
+  for (const [command, args] of commands) {
+    if (!commandExists(command)) continue;
+    const result = tryRun(command, [...args], cwd);
+    if (result.ok && result.stdout.trim()) return result.stdout;
+  }
+
+  return undefined;
+}
+
+function jiraIssueType(cwd: string, ticketKey: string): string | undefined {
+  const text = jiraIssueText(cwd, ticketKey);
+  if (!text) return undefined;
+
+  const issueTypeLine = text
+    .split("\n")
+    .find((line) => /(^|\b)(type|issue type)\s*:/i.test(line));
+  if (!issueTypeLine) return undefined;
+
+  return issueTypeLine.replace(/^.*?(type|issue type)\s*:\s*/i, "").trim();
+}
+
+function branchTypeForTicket(cwd: string, ticketKey: string): "feat" | "fix" {
+  const issueType = jiraIssueType(cwd, ticketKey);
+  return issueType && /\bbug\b/i.test(issueType) ? "fix" : "feat";
+}
+
+function branchNameForInput(cwd: string, input: string): string {
+  const ticketKey = ticketKeyFrom(input);
+  if (ticketKey) return `${branchTypeForTicket(cwd, ticketKey)}/${ticketKey}`;
+  return sanitizeBranchName(input);
+}
+
 function isValidBranchName(cwd: string, branch: string): boolean {
   return tryRun("git", ["check-ref-format", "--branch", branch], cwd).ok;
 }
@@ -222,7 +266,27 @@ function copyConfiguredFiles(sourceRoot: string, targetRoot: string, relativePat
 }
 
 async function runShellCommand(cwd: string, command: string): Promise<{ ok: true; stdout: string } | { ok: false; error: string }> {
-  return runAsync("bash", ["-lc", command], cwd);
+  return new Promise((resolve) => {
+    const child = spawn("bash", ["-lc", command], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const output: string[] = [];
+    const append = (chunk: Buffer) => {
+      const text = chunk.toString();
+      output.push(text);
+      if (output.join("").length > 12000) output.splice(0, output.length - 1);
+    };
+
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    child.on("error", (error) => resolve({ ok: false, error: error.message }));
+    child.on("close", (code) => {
+      const text = output.join("").trim();
+      if (code === 0) {
+        resolve({ ok: true, stdout: text });
+      } else {
+        resolve({ ok: false, error: text || `Command exited with status ${code}: ${command}` });
+      }
+    });
+  });
 }
 
 function clearProgress(ctx: ExtensionContext) {
@@ -284,8 +348,13 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   const root = repoRoot(ctx.cwd);
   const config = loadConfig(ctx.cwd);
   const primaryPath = primaryWorktreePath(root);
-  const branch = sanitizeBranchName(input);
-  const hasBootstrap = Boolean(config.copyFromPrimary?.length || config.bootstrapCommands?.length || config.verifyPaths?.length);
+  const branch = branchNameForInput(root, input);
+  const hasBootstrap = Boolean(
+    config.copyFromPrimary?.length ||
+    config.bootstrapCommands?.length ||
+    config.verifyPaths?.length ||
+    config.verifyCommands?.length,
+  );
   const steps: ProgressStep[] = [
     { label: "Validate branch and paths", status: "pending" },
     { label: `Fetch ${config.remote} and prune stale refs`, status: "pending" },
@@ -367,10 +436,24 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
       }
     }
 
-    const missing = (config.verifyPaths ?? []).filter((relativePath) => !existsSync(path.join(targetPath, relativePath)));
+    const verifyPaths = [...(config.verifyPaths ?? [])];
+    if (existsSync(path.join(targetPath, "package.json")) && existsSync(path.join(targetPath, "nx.json"))) {
+      verifyPaths.push("node_modules/.bin/nx");
+    }
+
+    const missing = Array.from(new Set(verifyPaths)).filter((relativePath) => !existsSync(path.join(targetPath, relativePath)));
     if (missing.length > 0) {
       fail(ctx, steps, bootstrapStepIndex, `Worktree bootstrap incomplete. Missing: ${missing.join(", ")}`);
       return;
+    }
+
+    for (const command of config.verifyCommands ?? []) {
+      await showProgress(ctx, `Verifying: ${command}`, steps);
+      const result = await runShellCommand(targetPath, command);
+      if (!result.ok) {
+        fail(ctx, steps, bootstrapStepIndex, result.error || `Verification command failed: ${command}`);
+        return;
+      }
     }
 
     mark(steps, bootstrapStepIndex, "done");
@@ -383,6 +466,15 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
   mark(steps, copyPathStepIndex, "done");
   clearProgress(ctx);
   ctx.ui.notify(cdCommand, "success");
+
+  const ticketKey = ticketKeyFrom(input);
+  if (ticketKey && await ctx.ui.confirm("Create ticket plan?", `Use the start-ticket skill to create ${targetPath}/.pi/plan.md now?`)) {
+    await ctx.sendUserMessage(
+      `/skill:start-ticket Create a plan only for ${ticketKey} in the existing worktree ${targetPath}. ` +
+      `Use the start-ticket workflow to fetch ticket context, inspect the repo, and write ${targetPath}/.pi/plan.md. ` +
+      `Do not create another branch or worktree and do not edit production code. Stop after presenting the plan for approval.`,
+    );
+  }
 }
 
 function findWorktree(root: string, selected: Worktree | string): Worktree | undefined {
