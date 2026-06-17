@@ -102,7 +102,7 @@ function primaryWorktreePath(cwd: string): string {
 function loadConfig(cwd: string): WorktreeConfig {
   const root = repoRoot(cwd);
   const primaryPath = primaryWorktreePath(root);
-  const configRoots = Array.from(new Set([root, primaryPath]));
+  const configRoots = Array.from(new Set([primaryPath, root]));
   const candidates = configRoots.flatMap((configRoot) => [
     path.join(configRoot, ".pi", "worktrees.json"),
     path.join(configRoot, ".pi", "worktrees.config.json"),
@@ -263,6 +263,54 @@ function copyConfiguredFiles(sourceRoot: string, targetRoot: string, relativePat
     copied.push(relativePath);
   }
   return copied;
+}
+
+function readJsonFile<T>(filePath: string): T | undefined {
+  try {
+    return JSON.parse(readFileSync(filePath, "utf8")) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+type PackageJson = {
+  workspaces?: string[] | { packages?: string[] };
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+};
+
+function workspaceGlobs(pkg: PackageJson | undefined): string[] {
+  if (!pkg?.workspaces) return [];
+  return Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces.packages ?? [];
+}
+
+function workspacePackageDirs(root: string): string[] {
+  const pkg = readJsonFile<PackageJson>(path.join(root, "package.json"));
+  return workspaceGlobs(pkg)
+    .filter((glob) => !glob.includes("*"))
+    .filter((relativePath) => existsSync(path.join(root, relativePath, "package.json")));
+}
+
+function workspaceUsesDependency(root: string, workspaceDir: string, dependency: string): boolean {
+  const pkg = readJsonFile<PackageJson>(path.join(root, workspaceDir, "package.json"));
+  return Boolean(pkg?.dependencies?.[dependency] || pkg?.devDependencies?.[dependency]);
+}
+
+function normalizeBootstrapCommand(cwd: string, command: string): string {
+  if (command.trim() !== "npm install") return command;
+  const pkg = readJsonFile<PackageJson>(path.join(cwd, "package.json"));
+  if (workspaceGlobs(pkg).length === 0) return command;
+  return "npm install --workspaces --include-workspace-root";
+}
+
+function implicitVerifyCommands(root: string): string[] {
+  const commands: string[] = [];
+  for (const workspaceDir of workspacePackageDirs(root)) {
+    if (workspaceUsesDependency(root, workspaceDir, "next")) {
+      commands.push(`cd ${shellQuote(workspaceDir)} && npm exec next -- --version`);
+    }
+  }
+  return commands;
 }
 
 async function runShellCommand(cwd: string, command: string): Promise<{ ok: true; stdout: string } | { ok: false; error: string }> {
@@ -427,7 +475,8 @@ async function createWorktree(pi: ExtensionAPI, ctx: ExtensionContext, input: st
     const copied = copyConfiguredFiles(primaryPath, targetPath, config.copyFromPrimary ?? []);
     if (copied.length > 0) await showProgress(ctx, `Copied local files: ${copied.join(", ")}`, steps);
 
-    for (const command of config.bootstrapCommands ?? []) {
+    for (const configuredCommand of config.bootstrapCommands ?? []) {
+      const command = normalizeBootstrapCommand(targetPath, configuredCommand);
       await showProgress(ctx, `Running: ${command}`, steps);
       const result = await runShellCommand(targetPath, command);
       if (!result.ok) {
@@ -447,7 +496,8 @@ async function createWorktree(pi: ExtensionAPI, ctx: ExtensionContext, input: st
       return;
     }
 
-    for (const command of config.verifyCommands ?? []) {
+    const verifyCommands = Array.from(new Set([...(config.verifyCommands ?? []), ...implicitVerifyCommands(targetPath)]));
+    for (const command of verifyCommands) {
       await showProgress(ctx, `Verifying: ${command}`, steps);
       const result = await runShellCommand(targetPath, command);
       if (!result.ok) {
