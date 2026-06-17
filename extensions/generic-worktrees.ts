@@ -344,7 +344,7 @@ function fail(ctx: ExtensionContext, steps: ProgressStep[], index: number, messa
   ctx.ui.notify(message, "error");
 }
 
-async function createWorktree(ctx: ExtensionContext, input: string) {
+async function createWorktree(pi: ExtensionAPI, ctx: ExtensionContext, input: string) {
   const root = repoRoot(ctx.cwd);
   const config = loadConfig(ctx.cwd);
   const primaryPath = primaryWorktreePath(root);
@@ -469,7 +469,7 @@ async function createWorktree(ctx: ExtensionContext, input: string) {
 
   const ticketKey = ticketKeyFrom(input);
   if (ticketKey && await ctx.ui.confirm("Create ticket plan?", `Use the start-ticket skill to create ${targetPath}/.pi/plan.md now?`)) {
-    await ctx.sendUserMessage(
+    pi.sendUserMessage(
       `/skill:start-ticket Create a plan only for ${ticketKey} in the existing worktree ${targetPath}. ` +
       `Use the start-ticket workflow to fetch ticket context, inspect the repo, and write ${targetPath}/.pi/plan.md. ` +
       `Do not create another branch or worktree and do not edit production code. Stop after presenting the plan for approval.`,
@@ -603,7 +603,7 @@ export default function genericWorktrees(pi: ExtensionAPI) {
 
       if (selected === create) {
         const input = await ctx.ui.input("Branch name, ticket key, or PR URL", "feat/my-change");
-        if (input?.trim()) await createWorktree(ctx, input.trim());
+        if (input?.trim()) await createWorktree(pi, ctx, input.trim());
         return;
       }
 
@@ -624,7 +624,7 @@ export default function genericWorktrees(pi: ExtensionAPI) {
     description: "Create a git worktree in ../worktrees from a branch name, ticket key, or PR URL",
     handler: async (args, ctx) => {
       const input = args.trim() || (await ctx.ui.input("Branch name, ticket key, or PR URL", "feat/my-change"))?.trim();
-      if (input) await createWorktree(ctx, input);
+      if (input) await createWorktree(pi, ctx, input);
     },
   });
 
