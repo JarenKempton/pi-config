@@ -21,5 +21,6 @@ Rules:
 - Create personal extensions in `~/.pi/agent/pi-config/extensions/<extension-name>.ts`.
 - Create personal prompt templates in `~/.pi/agent/pi-config/prompts/<name>.md`.
 - Create personal themes in `~/.pi/agent/pi-config/themes/<name>.json`.
+- For browser QA, UI verification, web bug reproduction, authenticated dashboards, console/network inspection, or end-to-end UI checks, automatically use the `test-in-browser` skill and its `authenticated-browser` Playwright MCP server. Reuse the user's running debug-enabled browser; do not launch a separate headless session. Treat login/SSO/MFA screens as a user authentication handoff, then resume the same browser loop.
 - Do not create shared personal resources in `~/.pi/agent/skills`, `~/.pi/agent/extensions`, `~/.pi/agent/prompts`, `~/.pi/agent/themes`, project `.pi/` folders, or other local-only locations unless the user explicitly asks for machine-local or project-local config.
 - After changing this repo, check `git -C ~/.pi/agent/pi-config status` and make sure the change is committed and pushed.

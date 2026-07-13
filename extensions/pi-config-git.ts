@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { existsSync, lstatSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -9,6 +9,10 @@ const REPO_DIR = resolve(EXTENSION_DIR, "..");
 const PI_DIR = resolve(HOME, ".pi/agent");
 const GLOBAL_AGENTS_PATH = resolve(PI_DIR, "AGENTS.md");
 const GLOBAL_REPO_LINK = resolve(PI_DIR, "pi-config");
+const GLOBAL_MCP_PATH = resolve(PI_DIR, "mcp.json");
+const BROWSER_SKILL_PATH = resolve(REPO_DIR, "skills/test-in-browser");
+const CODEX_BROWSER_SKILL_LINK = resolve(HOME, ".codex/skills/test-in-browser");
+const CLAUDE_BROWSER_SKILL_LINK = resolve(HOME, ".claude/skills/test-in-browser");
 const WATCH_PATHS = [REPO_DIR];
 
 function expandHome(input: string | undefined) {
@@ -37,9 +41,27 @@ function ensureSymlink(linkPath: string, targetPath: string) {
   }
 }
 
+function ensureNonDestructiveSymlink(linkPath: string, targetPath: string) {
+  try {
+    mkdirSync(dirname(linkPath), { recursive: true });
+    if (existsSync(linkPath)) {
+      const stat = lstatSync(linkPath);
+      if (!stat.isSymbolicLink()) return;
+      if (resolve(dirname(linkPath), readlinkSync(linkPath)) === targetPath) return;
+      rmSync(linkPath, { force: true });
+    }
+    symlinkSync(targetPath, linkPath);
+  } catch {
+    // Best-effort cross-harness discovery only. The explicit bootstrap reports conflicts.
+  }
+}
+
 function ensureGlobalConfigLinks() {
   ensureSymlink(GLOBAL_REPO_LINK, REPO_DIR);
   ensureSymlink(GLOBAL_AGENTS_PATH, resolve(REPO_DIR, "AGENTS.md"));
+  ensureNonDestructiveSymlink(GLOBAL_MCP_PATH, resolve(REPO_DIR, "mcp.json"));
+  ensureNonDestructiveSymlink(CODEX_BROWSER_SKILL_LINK, BROWSER_SKILL_PATH);
+  ensureNonDestructiveSymlink(CLAUDE_BROWSER_SKILL_LINK, BROWSER_SKILL_PATH);
 }
 
 async function execGit(pi: ExtensionAPI, args: string[]) {

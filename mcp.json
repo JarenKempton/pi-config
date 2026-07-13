@@ -1,0 +1,15 @@
+{
+  "settings": {
+    "toolPrefix": "short",
+    "idleTimeout": 20,
+    "requestTimeoutMs": 60000,
+    "outputGuard": true
+  },
+  "mcpServers": {
+    "authenticated-browser": {
+      "url": "http://localhost:8931/mcp",
+      "idleTimeout": 20,
+      "requestTimeoutMs": 60000
+    }
+  }
+}

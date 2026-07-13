@@ -5,6 +5,7 @@
   "defaultThinkingLevel": "low",
   "theme": "github-dark-default",
   "packages": [
-    "git:git@github.com:JarenKempton/pi-config"
+    "git:git@github.com:JarenKempton/pi-config",
+    "npm:pi-mcp-adapter"
   ]
 }
