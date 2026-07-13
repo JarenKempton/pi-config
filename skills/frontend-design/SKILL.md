@@ -32,6 +32,38 @@ However, do not treat constraints as a reason to become generic. If a bold desig
 
 Use this skill to expand the design possibility space inside tight systems. Prefer experiments that can be implemented reversibly, behind isolated components, feature branches, or clearly scoped visual variations.
 
+## Figma-to-Code Source of Truth
+
+When a user provides a Figma link/node, treat Figma variables and measured browser output as the source of truth for visual parity.
+
+Required workflow:
+1. Use the Figma MCP design context, screenshot, and variable definitions for the target node.
+2. Build a token map before coding. Do not assume project CSS variables with similar names have the same values as Figma variables.
+3. Compare the Figma variable value to the project variable's computed value. If they differ, call out the mismatch explicitly and choose one:
+   - exact Figma parity for this component via local CSS/custom properties, or
+   - existing app-system consistency using project tokens.
+4. For visual QA, use the authenticated browser to inspect computed styles for the implemented component and compare against Figma values: dimensions, padding, gap, border, radius, background, typography, and control states.
+5. If an existing component has the right semantics but wrong visual metrics, add narrow local overrides or propose a design-token cleanup. Do not silently accept the mismatch.
+
+Current SalesAi Figma token mapping notes / proof-of-concept glossary:
+
+| Figma token | Figma value observed | Project token caveat |
+| --- | ---: | --- |
+| `surfaces/raised` | `#141416` | Project `--surfaces-raised` is currently `#18181a`; do not treat as equivalent. |
+| `surfaces/high` | `#1c1c1e` | Project `--surfaces-high` is currently `#141416`; this matches Figma `surfaces/raised`, not Figma `surfaces/high`. |
+| `surfaces/higher` | `#202022` | Project `--surfaces-higher` is currently `#1e2021`; close but not exact. |
+| `borders/brand` | `#3ede6f` | Project `--borders-brand` matches. |
+| `borders/subtle` | `#272729` | Verify project token before use. |
+| `borders/strong` | `#353637` | Verify project token before use. |
+| `borders/stronger` | `#4e4f50` | Verify project token before use. |
+| spacing `xxxs` | `2px` | Prefer exact spacing value if project spacing aliases differ. |
+| spacing `xxs` | `4px` | Figma button/control radius may be `4px`; existing components can default to `8px`. |
+| spacing `xs` | `8px` | Verify against `--xs` / `--default-spacing` in project. |
+| spacing `sm` | `12px` | Verify against project token. |
+| spacing `md` | `16px` | Verify against project token. |
+
+For SalesAi work, phrase design-token findings in Figma terms first (`surfaces/high`, `borders/brand`, etc.), then note the current CSS variable implementation. This keeps design/product/code conversations aligned even while globals are inconsistent.
+
 ## Frontend Aesthetics Guidelines
 
 Focus on:
