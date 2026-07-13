@@ -45,24 +45,7 @@ Required workflow:
 4. For visual QA, use the authenticated browser to inspect computed styles for the implemented component and compare against Figma values: dimensions, padding, gap, border, radius, background, typography, and control states.
 5. If an existing component has the right semantics but wrong visual metrics, add narrow local overrides or propose a design-token cleanup. Do not silently accept the mismatch.
 
-Current SalesAi Figma token mapping notes / proof-of-concept glossary:
-
-| Figma token | Figma value observed | Project token caveat |
-| --- | ---: | --- |
-| `surfaces/raised` | `#141416` | Project `--surfaces-raised` is currently `#18181a`; do not treat as equivalent. |
-| `surfaces/high` | `#1c1c1e` | Project `--surfaces-high` is currently `#141416`; this matches Figma `surfaces/raised`, not Figma `surfaces/high`. |
-| `surfaces/higher` | `#202022` | Project `--surfaces-higher` is currently `#1e2021`; close but not exact. |
-| `borders/brand` | `#3ede6f` | Project `--borders-brand` matches. |
-| `borders/subtle` | `#272729` | Verify project token before use. |
-| `borders/strong` | `#353637` | Verify project token before use. |
-| `borders/stronger` | `#4e4f50` | Verify project token before use. |
-| spacing `xxxs` | `2px` | Prefer exact spacing value if project spacing aliases differ. |
-| spacing `xxs` | `4px` | Figma button/control radius may be `4px`; existing components can default to `8px`. |
-| spacing `xs` | `8px` | Verify against `--xs` / `--default-spacing` in project. |
-| spacing `sm` | `12px` | Verify against project token. |
-| spacing `md` | `16px` | Verify against project token. |
-
-For SalesAi work, phrase design-token findings in Figma terms first (`surfaces/high`, `borders/brand`, etc.), then note the current CSS variable implementation. This keeps design/product/code conversations aligned even while globals are inconsistent.
+Keep project-specific token glossaries, component mappings, and design-system exceptions in project-level skills or repository docs, not in this global skill.
 
 ## Frontend Aesthetics Guidelines
 
