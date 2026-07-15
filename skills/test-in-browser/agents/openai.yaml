@@ -1,4 +1,0 @@
-interface:
-  display_name: "Test in Browser"
-  short_description: "Run QA in an authenticated browser"
-  default_prompt: "Use $test-in-browser to verify this behavior in my authenticated browser session."
