@@ -52,8 +52,8 @@ function ensureNodeVersion() {
 
 function ensureLink(linkPath, targetPath) {
   mkdirSync(dirname(linkPath), { recursive: true });
-  if (existsSync(linkPath)) {
-    const stat = lstatSync(linkPath);
+  const stat = lstatSync(linkPath, { throwIfNoEntry: false });
+  if (stat) {
     if (!stat.isSymbolicLink()) {
       throw new Error(`Refusing to replace non-symlink path: ${linkPath}`);
     }
