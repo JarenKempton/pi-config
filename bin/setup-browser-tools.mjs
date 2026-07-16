@@ -9,7 +9,10 @@ import { fileURLToPath } from "node:url";
 const apply = process.argv.includes("--apply");
 const home = homedir();
 const repoDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const skillDir = resolve(repoDir, "skills/test-in-browser");
+const skillDir = resolve(
+  home,
+  ".pi/agent/git/github.com/JarenKempton/agent-skills/skills/engineering/test-in-browser",
+);
 const runner = resolve(skillDir, "scripts/browser-cdp.mjs");
 const mcpConfig = resolve(repoDir, "mcp.json");
 const serverName = "authenticated-browser";
@@ -157,6 +160,11 @@ function preview() {
 
 try {
   ensureNodeVersion();
+  if (!existsSync(runner)) {
+    throw new Error(
+      "test-in-browser is not installed; run pi install git:git@github.com/JarenKempton/agent-skills",
+    );
+  }
   preview();
   if (!apply) {
     report("\nPreview only. Re-run with --apply to perform these changes.");
