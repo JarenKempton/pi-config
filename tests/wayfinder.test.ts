@@ -74,6 +74,20 @@ test("tracker migration pointers identify Linear as canonical", () => {
   });
 });
 
+test("an unconfigured repository renders an actionable empty state instead of crashing", () => {
+  const data: CockpitData = {
+    ...structuredClone(defaultData),
+    maps: [],
+    trackerRefresh: {
+      state: "error",
+      error: "Wayfinder is not configured for this repository.",
+    },
+  };
+  const output = renderCockpit(initialState(data), data, theme, 120, 18).join("\n");
+  assert.match(output, /NO MAPS AVAILABLE/);
+  assert.match(output, /Wayfinder is not configured for this repository/);
+});
+
 test("the cockpit reserves a stable height while selection details change", () => {
   const data = structuredClone(defaultData);
   data.maps[1]!.source = {

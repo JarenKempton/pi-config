@@ -1092,6 +1092,18 @@ export function renderCockpit(
       theme.fg("accent", "Loading repository map roots…"),
       theme.fg("dim", "The cockpit is open; tracker data will appear as it arrives."),
     ];
+  } else if (state.screen === "maps" && data.maps.length === 0) {
+    const message = data.trackerRefresh?.error ??
+      "No epic or Wayfinder map roots were found for this repository.";
+    content = [
+      section(theme, "NO MAPS AVAILABLE"),
+      "",
+      ...wrap(message, Math.max(24, innerWidth - 2)).map((line) =>
+        theme.fg(data.trackerRefresh?.state === "error" ? "warning" : "text", line),
+      ),
+      "",
+      theme.fg("dim", "Wayfinder remains inactive until this repository is configured."),
+    ];
   } else if (state.screen === "maps") content = mapPicker(state, data, theme, innerWidth);
   else if (state.screen === "map") content = mapBoard(state, data, theme, innerWidth);
   else if (state.screen === "ticket") content = ticketScreen(state, data, theme, innerWidth);
