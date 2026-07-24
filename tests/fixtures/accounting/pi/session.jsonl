@@ -1,0 +1,2 @@
+{"type":"message","id":"p1","timestamp":"2026-01-15T12:00:00.000Z","message":{"role":"assistant","provider":"openai","model":"gpt-5","usage":{"input":1000,"output":2000,"cacheRead":300,"totalTokens":3300}}}
+{"bad"

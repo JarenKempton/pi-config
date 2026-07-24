@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -17,6 +18,28 @@ type WorktreeConfig = {
   bootstrapCommands?: string[];
   verifyPaths?: string[];
   verifyCommands?: string[];
+  ticket?: {
+    branchTemplate?: string;
+    pathTemplate?: string;
+  };
+};
+
+type WorktreeCreateInput = {
+  branch?: string;
+  ticket_key?: string;
+  ticket_title?: string;
+  change_type?: string;
+  input?: string;
+};
+
+type WorktreeCreateResult = {
+  ok: boolean;
+  path?: string;
+  branch?: string;
+  status: string;
+  copied?: string[];
+  upstream?: string;
+  error?: string;
 };
 
 const WIDGET_ID = "generic-worktrees-progress";
@@ -60,6 +83,10 @@ function runAsync(command: string, args: string[], cwd: string): Promise<{ ok: t
   });
 }
 
+function commandError(result: { ok: true; stdout: string } | { ok: false; error: string }) {
+  return "error" in result ? result.error : "";
+}
+
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -99,7 +126,7 @@ function primaryWorktreePath(cwd: string): string {
   return worktrees(cwd)[0]?.path ?? repoRoot(cwd);
 }
 
-function loadConfig(cwd: string): WorktreeConfig {
+export function loadConfig(cwd: string): WorktreeConfig {
   const root = repoRoot(cwd);
   const primaryPath = primaryWorktreePath(root);
   const configRoots = Array.from(new Set([primaryPath, root]));
@@ -199,15 +226,51 @@ function jiraIssueType(cwd: string, ticketKey: string): string | undefined {
   return issueTypeLine.replace(/^.*?(type|issue type)\s*:\s*/i, "").trim();
 }
 
-function branchTypeForTicket(cwd: string, ticketKey: string): "feat" | "fix" {
+function changeTypeSlug(input: string | undefined): string {
+  const value = (input ?? "").trim().toLowerCase();
+  if (/^(fix|bug|bugfix|hotfix)$/.test(value)) return "fix";
+  if (/^(chore|docs|test|refactor|perf|style)$/.test(value)) return value;
+  return "feat";
+}
+
+function branchTypeForTicket(cwd: string, ticketKey: string, changeType?: string): string {
+  if (changeType) return changeTypeSlug(changeType);
   const issueType = jiraIssueType(cwd, ticketKey);
   return issueType && /\bbug\b/i.test(issueType) ? "fix" : "feat";
 }
 
-function branchNameForInput(cwd: string, input: string): string {
-  const ticketKey = ticketKeyFrom(input);
-  if (ticketKey) return `${branchTypeForTicket(cwd, ticketKey)}/${ticketKey}`;
-  return sanitizeBranchName(input);
+function slugify(input: string | undefined): string {
+  return (input ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function applyTicketTemplate(template: string, values: { type: string; key: string; slug: string }): string {
+  return template
+    .replace(/\{type\}/g, values.type)
+    .replace(/\{key\}/g, values.key)
+    .replace(/\{slug\}/g, values.slug)
+    .replace(/-+(?=\/|$)/g, "")
+    .replace(/\/+/g, "/")
+    .replace(/^\/|\/$/g, "");
+}
+
+export function branchNameForCreateInput(cwd: string, config: WorktreeConfig, request: WorktreeCreateInput): string {
+  const explicitBranch = (request.branch ?? "").trim();
+  if (explicitBranch) return sanitizeBranchName(explicitBranch);
+
+  const rawInput = (request.input ?? "").trim();
+  const ticketKey = (request.ticket_key ?? ticketKeyFrom(rawInput) ?? "").toUpperCase();
+  if (ticketKey) {
+    const type = branchTypeForTicket(cwd, ticketKey, request.change_type);
+    const slug = slugify(request.ticket_title);
+    return applyTicketTemplate(config.ticket?.branchTemplate ?? "{type}/{key}-{slug}", { type, key: ticketKey, slug });
+  }
+
+  return sanitizeBranchName(rawInput);
 }
 
 function isValidBranchName(cwd: string, branch: string): boolean {
@@ -222,8 +285,17 @@ function ticketKeyFrom(input: string): string | undefined {
   return input.match(/[A-Z][A-Z0-9]+-\d+/i)?.[0]?.toUpperCase();
 }
 
-function targetFolderNameFor(input: string, branch: string): string {
-  return ticketKeyFrom(input) ?? folderNameFor(branch);
+export function targetFolderNameForCreateInput(config: WorktreeConfig, request: WorktreeCreateInput, branch: string): string {
+  const rawInput = (request.input ?? "").trim();
+  const ticketKey = (request.ticket_key ?? ticketKeyFrom(rawInput) ?? "").toUpperCase();
+  if (ticketKey) {
+    return applyTicketTemplate(config.ticket?.pathTemplate ?? "{key}", {
+      type: changeTypeSlug(request.change_type),
+      key: ticketKey,
+      slug: slugify(request.ticket_title),
+    });
+  }
+  return folderNameFor(branch);
 }
 
 function label(wt: Worktree, currentPath: string, primaryPath: string): string {
@@ -247,14 +319,31 @@ function statusShort(cwd: string): string {
   return run("git", ["status", "--short"], cwd);
 }
 
-function worktreesDirFor(mainRepoPath: string, config: WorktreeConfig): string {
+export function worktreesDirFor(mainRepoPath: string, config: WorktreeConfig): string {
   if (!config.worktreesDir) return path.join(path.dirname(mainRepoPath), "worktrees");
   return path.isAbsolute(config.worktreesDir) ? config.worktreesDir : path.resolve(mainRepoPath, config.worktreesDir);
+}
+
+function assertSafeRelativePath(relativePath: string, label: string) {
+  if (!relativePath || path.isAbsolute(relativePath) || relativePath.split(/[\\/]+/).includes("..")) {
+    throw new Error(`Unsafe ${label} path: ${relativePath}`);
+  }
+}
+
+function resolveChildPath(parent: string, childName: string): string {
+  assertSafeRelativePath(childName, "worktree target");
+  const resolved = path.resolve(parent, childName);
+  const relative = path.relative(path.resolve(parent), resolved);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Unsafe worktree target path: ${childName}`);
+  }
+  return resolved;
 }
 
 function copyConfiguredFiles(sourceRoot: string, targetRoot: string, relativePaths: string[]): string[] {
   const copied: string[] = [];
   for (const relativePath of relativePaths) {
+    assertSafeRelativePath(relativePath, "copyFromPrimary");
     const from = path.join(sourceRoot, relativePath);
     const to = path.join(targetRoot, relativePath);
     if (!existsSync(from) || existsSync(to)) continue;
@@ -392,53 +481,49 @@ function fail(ctx: ExtensionContext, steps: ProgressStep[], index: number, messa
   ctx.ui.notify(message, "error");
 }
 
-async function createWorktree(pi: ExtensionAPI, ctx: ExtensionContext, input: string) {
-  const root = repoRoot(ctx.cwd);
-  const config = loadConfig(ctx.cwd);
+export async function createWorktreeService(cwd: string, request: WorktreeCreateInput, onStatus?: (status: string) => Promise<void> | void): Promise<WorktreeCreateResult> {
+  const root = repoRoot(cwd);
+  const config = loadConfig(cwd);
   const primaryPath = primaryWorktreePath(root);
-  const branch = branchNameForInput(root, input);
-  const hasBootstrap = Boolean(
-    config.copyFromPrimary?.length ||
-    config.bootstrapCommands?.length ||
-    config.verifyPaths?.length ||
-    config.verifyCommands?.length,
-  );
-  const steps: ProgressStep[] = [
-    { label: "Validate branch and paths", status: "pending" },
-    { label: `Fetch ${config.remote} and prune stale refs`, status: "pending" },
-    { label: "Create isolated worktree branch", status: "pending" },
-    { label: "Set upstream to the matching remote branch", status: "pending" },
-    ...(hasBootstrap ? [{ label: "Run project worktree bootstrap", status: "pending" as StepStatus }] : []),
-    { label: "Copy worktree path", status: "pending" },
-  ];
+  const branch = branchNameForCreateInput(root, config, request);
 
-  mark(steps, 0, "active");
-  await showProgress(ctx, "Validating worktree request…", steps);
-  if (!branch) {
-    fail(ctx, steps, 0, "Provide a branch name, ticket key, PR URL, or other branch-like identifier.");
-    return;
-  }
-  if (!isValidBranchName(root, branch)) {
-    fail(ctx, steps, 0, `Invalid git branch name: ${branch}`);
-    return;
-  }
+  const status = async (message: string) => {
+    if (onStatus) await onStatus(message);
+  };
+
+  if (!branch) return { ok: false, status: "error", error: "Provide a branch name, ticket key, PR URL, or other branch-like identifier." };
+  if (!isValidBranchName(root, branch)) return { ok: false, branch, status: "error", error: `Invalid git branch name: ${branch}` };
 
   const targetBaseDir = worktreesDirFor(primaryPath, config);
-  const targetPath = path.join(targetBaseDir, targetFolderNameFor(input, branch));
-  if (existsSync(targetPath)) {
-    fail(ctx, steps, 0, `Target path already exists: ${targetPath}`);
-    return;
+  let targetPath: string;
+  try {
+    targetPath = resolveChildPath(targetBaseDir, targetFolderNameForCreateInput(config, request, branch));
+  } catch (error) {
+    return { ok: false, branch, status: "error", error: error instanceof Error ? error.message : String(error) };
   }
+
+  try {
+    for (const relativePath of config.copyFromPrimary ?? []) assertSafeRelativePath(relativePath, "copyFromPrimary");
+    for (const relativePath of config.verifyPaths ?? []) assertSafeRelativePath(relativePath, "verifyPaths");
+  } catch (error) {
+    return { ok: false, branch, path: targetPath, status: "unsafe-config", error: error instanceof Error ? error.message : String(error) };
+  }
+
+  const existingCheckout = worktrees(root).find((item) => item.branch === branch);
+  if (existingCheckout) {
+    return { ok: false, branch, path: existingCheckout.path, status: "collision", error: `Branch ${branch} is already checked out at ${existingCheckout.path}` };
+  }
+  if (existsSync(targetPath)) {
+    return { ok: false, branch, path: targetPath, status: "collision", error: `Target path already exists: ${targetPath}` };
+  }
+
   mkdirSync(targetBaseDir, { recursive: true });
-  mark(steps, 0, "done");
 
-  mark(steps, 1, "active");
-  await showProgress(ctx, `Fetching ${config.remote}…`, steps);
-  await runAsync("git", ["fetch", config.remote, "--prune"], root);
-  mark(steps, 1, "done");
+  await status(`Fetching ${config.remote} and pruning stale refs…`);
+  const fetched = await runAsync("git", ["fetch", config.remote, "--prune"], root);
+  if (!fetched.ok) return { ok: false, branch, path: targetPath, status: "fetch-failed", error: commandError(fetched) };
 
-  mark(steps, 2, "active");
-  await showProgress(ctx, `Creating ${branch} in ${targetPath}…`, steps);
+  await status(`Creating ${branch} in ${targetPath}…`);
   let args: string[];
   if (branchExists(root, branch)) {
     args = ["worktree", "add", targetPath, branch];
@@ -449,82 +534,100 @@ async function createWorktree(pi: ExtensionAPI, ctx: ExtensionContext, input: st
   }
 
   const created = await runAsync("git", args, root);
-  if (created.ok === false) {
-    fail(ctx, steps, 2, created.error || `Failed to create worktree ${branch}`);
-    return;
-  }
-  mark(steps, 2, "done");
+  if (!created.ok) return { ok: false, branch, path: targetPath, status: "create-failed", error: commandError(created) || `Failed to create worktree ${branch}` };
 
-  mark(steps, 3, "active");
-  await showProgress(ctx, `Ensuring ${branch} tracks ${remoteRef(config.remote, branch)}…`, steps);
+  await status(`Applying upstream configuration for ${branch}…`);
   await ensureBranchTracksOwnRemote(root, branch, config);
   const upstream = upstreamFor(root, branch);
   if (upstream === remoteRef(config.remote, config.baseBranch)) {
-    fail(ctx, steps, 3, `Refusing to leave ${branch} tracking ${remoteRef(config.remote, config.baseBranch)}.`);
+    return { ok: false, branch, path: targetPath, upstream, status: "unsafe-upstream", error: `Refusing to leave ${branch} tracking ${remoteRef(config.remote, config.baseBranch)}.` };
+  }
+
+  const copied = copyConfiguredFiles(primaryPath, targetPath, config.copyFromPrimary ?? []);
+  for (const configuredCommand of config.bootstrapCommands ?? []) {
+    const command = normalizeBootstrapCommand(targetPath, configuredCommand);
+    await status(`Running bootstrap command: ${command}`);
+    const result = await runShellCommand(targetPath, command);
+    if (!result.ok) return { ok: false, branch, path: targetPath, upstream, copied, status: "bootstrap-failed", error: commandError(result) || `Bootstrap command failed: ${command}` };
+  }
+
+  const verifyPaths = [...(config.verifyPaths ?? [])];
+  if (existsSync(path.join(targetPath, "package.json")) && existsSync(path.join(targetPath, "nx.json"))) {
+    verifyPaths.push("node_modules/.bin/nx");
+  }
+
+  const missing = Array.from(new Set(verifyPaths)).filter((relativePath) => !existsSync(path.join(targetPath, relativePath)));
+  if (missing.length > 0) {
+    return { ok: false, branch, path: targetPath, upstream, copied, status: "verify-failed", error: `Worktree bootstrap incomplete. Missing: ${missing.join(", ")}` };
+  }
+
+  const verifyCommands = Array.from(new Set([...(config.verifyCommands ?? []), ...implicitVerifyCommands(targetPath)]));
+  for (const command of verifyCommands) {
+    await status(`Running verification command: ${command}`);
+    const result = await runShellCommand(targetPath, command);
+    if (!result.ok) return { ok: false, branch, path: targetPath, upstream, copied, status: "verify-failed", error: commandError(result) || `Verification command failed: ${command}` };
+  }
+
+  return { ok: true, branch, path: targetPath, upstream, copied, status: `created ${branch} at ${targetPath}` };
+}
+
+async function createWorktree(_pi: ExtensionAPI, ctx: ExtensionContext, input: string) {
+  const root = repoRoot(ctx.cwd);
+  const config = loadConfig(ctx.cwd);
+  const hasBootstrap = Boolean(
+    config.copyFromPrimary?.length ||
+    config.bootstrapCommands?.length ||
+    config.verifyPaths?.length ||
+    config.verifyCommands?.length,
+  );
+  const steps: ProgressStep[] = [
+    { label: "Validate branch and paths", status: "pending" },
+    { label: `Fetch ${config.remote} and prune stale refs`, status: "pending" },
+    { label: "Create isolated worktree branch", status: "pending" },
+    { label: "Apply configured upstream behavior", status: "pending" },
+    ...(hasBootstrap ? [{ label: "Run project worktree bootstrap", status: "pending" as StepStatus }] : []),
+    { label: "Copy worktree path", status: "pending" },
+  ];
+
+  let statusIndex = 0;
+  mark(steps, statusIndex, "active");
+  const advance = async (message: string) => {
+    if (/^Fetching /.test(message)) {
+      mark(steps, statusIndex, "done");
+      statusIndex = 1;
+      mark(steps, statusIndex, "active");
+    } else if (/^Creating /.test(message)) {
+      mark(steps, statusIndex, "done");
+      statusIndex = 2;
+      mark(steps, statusIndex, "active");
+    } else if (/^Applying upstream /.test(message)) {
+      mark(steps, statusIndex, "done");
+      statusIndex = 3;
+      mark(steps, statusIndex, "active");
+    } else if (/^(Running bootstrap|Running verification)/.test(message) && hasBootstrap) {
+      mark(steps, statusIndex, "done");
+      statusIndex = 4;
+      mark(steps, statusIndex, "active");
+    }
+    await showProgress(ctx, message, steps);
+  };
+
+  await showProgress(ctx, "Validating worktree request…", steps);
+  const result = await createWorktreeService(ctx.cwd, { input }, advance);
+  if (!result.ok || !result.path) {
+    fail(ctx, steps, statusIndex, result.error ?? result.status);
     return;
   }
-  mark(steps, 3, "done");
 
-  let copyPathStepIndex = 4;
-  if (hasBootstrap) {
-    const bootstrapStepIndex = 4;
-    copyPathStepIndex = 5;
-    mark(steps, bootstrapStepIndex, "active");
-    await showProgress(ctx, "Running project worktree bootstrap…", steps);
-
-    const copied = copyConfiguredFiles(primaryPath, targetPath, config.copyFromPrimary ?? []);
-    if (copied.length > 0) await showProgress(ctx, `Copied local files: ${copied.join(", ")}`, steps);
-
-    for (const configuredCommand of config.bootstrapCommands ?? []) {
-      const command = normalizeBootstrapCommand(targetPath, configuredCommand);
-      await showProgress(ctx, `Running: ${command}`, steps);
-      const result = await runShellCommand(targetPath, command);
-      if (!result.ok) {
-        fail(ctx, steps, bootstrapStepIndex, result.error || `Bootstrap command failed: ${command}`);
-        return;
-      }
-    }
-
-    const verifyPaths = [...(config.verifyPaths ?? [])];
-    if (existsSync(path.join(targetPath, "package.json")) && existsSync(path.join(targetPath, "nx.json"))) {
-      verifyPaths.push("node_modules/.bin/nx");
-    }
-
-    const missing = Array.from(new Set(verifyPaths)).filter((relativePath) => !existsSync(path.join(targetPath, relativePath)));
-    if (missing.length > 0) {
-      fail(ctx, steps, bootstrapStepIndex, `Worktree bootstrap incomplete. Missing: ${missing.join(", ")}`);
-      return;
-    }
-
-    const verifyCommands = Array.from(new Set([...(config.verifyCommands ?? []), ...implicitVerifyCommands(targetPath)]));
-    for (const command of verifyCommands) {
-      await showProgress(ctx, `Verifying: ${command}`, steps);
-      const result = await runShellCommand(targetPath, command);
-      if (!result.ok) {
-        fail(ctx, steps, bootstrapStepIndex, result.error || `Verification command failed: ${command}`);
-        return;
-      }
-    }
-
-    mark(steps, bootstrapStepIndex, "done");
-  }
-
+  mark(steps, statusIndex, "done");
+  const copyPathStepIndex = steps.length - 1;
   mark(steps, copyPathStepIndex, "active");
   await showProgress(ctx, "Copying path to clipboard…", steps);
-  const cdCommand = `cd ${shellQuote(targetPath)}`;
+  const cdCommand = `cd ${shellQuote(result.path)}`;
   copyPath(cdCommand);
   mark(steps, copyPathStepIndex, "done");
   clearProgress(ctx);
-  ctx.ui.notify(cdCommand, "success");
-
-  const ticketKey = ticketKeyFrom(input);
-  if (ticketKey && await ctx.ui.confirm("Create ticket plan?", `Use the start-ticket skill to create ${targetPath}/.pi/plan.md now?`)) {
-    pi.sendUserMessage(
-      `/skill:start-ticket Create a plan only for ${ticketKey} in the existing worktree ${targetPath}. ` +
-      `Use the start-ticket workflow to fetch ticket context, inspect the repo, and write ${targetPath}/.pi/plan.md. ` +
-      `Do not create another branch or worktree and do not edit production code. Stop after presenting the plan for approval.`,
-    );
-  }
+  ctx.ui.notify(`${cdCommand}\n${result.status}`, "info");
 }
 
 function findWorktree(root: string, selected: Worktree | string): Worktree | undefined {
@@ -581,7 +684,7 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
   await showProgress(ctx, `Removing ${wt.path}…`, steps);
   const removed = await runAsync("git", ["worktree", "remove", ...(status ? ["--force"] : []), wt.path], root);
   if (removed.ok === false) {
-    fail(ctx, steps, 0, removed.error || `Failed to remove ${wt.path}`);
+    fail(ctx, steps, 0, commandError(removed) || `Failed to remove ${wt.path}`);
     return;
   }
   if (existsSync(wt.path)) rmSync(wt.path, { recursive: true, force: true });
@@ -600,7 +703,7 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
     if (deleted.ok) {
       branchNote += `\nDeleted local branch ${wt.branch}.`;
     } else {
-      branchNote += `\nLeft local branch ${wt.branch}: ${deleted.error}`;
+      branchNote += `\nLeft local branch ${wt.branch}: ${commandError(deleted)}`;
     }
 
     if (remoteTrackingRefExists(root, config, wt.branch)) {
@@ -611,7 +714,7 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
       if (deletedRemote.ok) {
         branchNote += `\nDeleted remote branch ${remoteRef(config.remote, wt.branch)}.`;
       } else {
-        branchNote += `\nLeft remote branch ${remoteRef(config.remote, wt.branch)}: ${deletedRemote.error}`;
+        branchNote += `\nLeft remote branch ${remoteRef(config.remote, wt.branch)}: ${commandError(deletedRemote)}`;
       }
     }
   }
@@ -626,10 +729,32 @@ async function deleteWorktree(ctx: ExtensionContext, selected: Worktree | string
   }
   mark(steps, 3, "done");
   clearProgress(ctx);
-  ctx.ui.notify(`Removed worktree:\n${wt.path}${branchNote}`, "success");
+  ctx.ui.notify(`Removed worktree:\n${wt.path}${branchNote}`, "info");
 }
 
 export default function genericWorktrees(pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "worktree_create",
+    label: "Create Worktree",
+    description:
+      "Create a git worktree using this repository's .pi/worktrees.json. Provide either explicit branch or ticket_key plus optional ticket_title/change_type. Does not invoke ticket planning.",
+    parameters: Type.Object({
+      branch: Type.Optional(Type.String({ description: "Explicit branch name to create or check out." })),
+      ticket_key: Type.Optional(Type.String({ description: "Ticket key such as ABC-123. Used with configured ticket templates." })),
+      ticket_title: Type.Optional(Type.String({ description: "Ticket title used to fill the {slug} branch/path template token." })),
+      change_type: Type.Optional(Type.String({ description: "Change type for the {type} token, for example feat, fix, chore, docs, refactor." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await createWorktreeService(ctx.cwd, params as WorktreeCreateInput);
+      return {
+        content: [{ type: "text", text: result.ok
+          ? `Created worktree\nPath: ${result.path}\nBranch: ${result.branch}\nStatus: ${result.status}${result.upstream ? `\nUpstream: ${result.upstream}` : ""}`
+          : `Failed to create worktree\nStatus: ${result.status}\nPath: ${result.path ?? "(none)"}\nBranch: ${result.branch ?? "(none)"}\nError: ${result.error ?? "unknown error"}` }],
+        details: result,
+      };
+    },
+  });
+
   pi.registerCommand("worktrees", {
     description: "Select, copy path, delete, or create a git worktree in ../worktrees",
     handler: async (_args, ctx) => {

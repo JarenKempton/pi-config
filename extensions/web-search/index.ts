@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -22,6 +25,30 @@ interface BuiltSearchQuery {
   exactPhrases: string[];
   excludeTerms: string[];
   site?: string;
+}
+
+async function boundedResponseText(response: Response, cap = 1_000_000) {
+  const reader = response.body?.getReader();
+  if (!reader) return (await response.text()).slice(0, cap);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    const remaining = cap - total;
+    if (remaining <= 0) {
+      await reader.cancel();
+      break;
+    }
+    chunks.push(value.subarray(0, remaining));
+    total += Math.min(value.byteLength, remaining);
+    if (value.byteLength > remaining) {
+      await reader.cancel();
+      break;
+    }
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
 function decodeHtml(value: string): string {
@@ -51,13 +78,16 @@ function normalizeDuckDuckGoUrl(href: string): string {
   }
 }
 
-async function duckDuckGoSearch(query: string, count: number, signal?: AbortSignal): Promise<SearchResult[]> {
+export async function duckDuckGoSearch(query: string, count: number, signal?: AbortSignal): Promise<SearchResult[]> {
   const url = new URL("https://html.duckduckgo.com/html/");
   url.searchParams.set("q", query);
+  const requestSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(20_000)])
+    : AbortSignal.timeout(20_000);
 
   const resp = await fetch(url.toString(), {
     method: "GET",
-    signal,
+    signal: requestSignal,
     headers: {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -65,11 +95,11 @@ async function duckDuckGoSearch(query: string, count: number, signal?: AbortSign
   });
 
   if (!resp.ok) {
-    const body = await resp.text();
+    const body = await boundedResponseText(resp);
     throw new Error(`DuckDuckGo HTML search failed (${resp.status}): ${body.slice(0, 300)}`);
   }
 
-  const html = await resp.text();
+  const html = await boundedResponseText(resp);
   const results: SearchResult[] = [];
   const blocks = html.split(/<div class="result results_links[^>]*>/g).slice(1);
 
@@ -89,6 +119,63 @@ async function duckDuckGoSearch(query: string, count: number, signal?: AbortSign
   }
 
   return results;
+}
+
+function loadFirecrawlApiKey(): string | undefined {
+  if (process.env.FIRECRAWL_API_KEY?.trim()) return process.env.FIRECRAWL_API_KEY.trim();
+  const envPath = join(homedir(), ".pi/agent/.env");
+  if (!existsSync(envPath)) return undefined;
+  const text = readFileSync(envPath, "utf8");
+  const match = text.match(/^\s*FIRECRAWL_API_KEY\s*=\s*(.+?)\s*$/m);
+  return match?.[1]?.replace(/^['\"]|['\"]$/g, "").trim() || undefined;
+}
+
+function isFirecrawlFallbackStatus(status: number): boolean {
+  return status === 401 || status === 403 || status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+export async function firecrawlSearch(query: string, count: number, signal?: AbortSignal, apiKey = loadFirecrawlApiKey()): Promise<SearchResult[]> {
+  if (!apiKey) throw new Error("FIRECRAWL_API_KEY is not configured");
+  const requestSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(35_000)])
+    : AbortSignal.timeout(35_000);
+  const resp = await fetch("https://api.firecrawl.dev/v1/search", {
+    method: "POST",
+    signal: requestSignal,
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ query, limit: count }),
+  });
+  const body = await boundedResponseText(resp);
+  if (!resp.ok) {
+    const err: any = new Error(`Firecrawl search failed (${resp.status}): ${body.slice(0, 300)}`);
+    err.status = resp.status;
+    err.fallback = isFirecrawlFallbackStatus(resp.status);
+    throw err;
+  }
+  let json: any;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    const error: any = new Error("Firecrawl search returned invalid JSON");
+    error.fallback = true;
+    throw error;
+  }
+  const items = Array.isArray(json?.data) ? json.data : Array.isArray(json?.results) ? json.results : [];
+  return items.slice(0, count).map((item: any) => ({ title: String(item.title ?? item.metadata?.title ?? item.url ?? "Untitled"), url: String(item.url ?? item.link ?? ""), snippet: String(item.description ?? item.snippet ?? item.markdown ?? "").replace(/\s+/g, " ").slice(0, 500) })).filter((r: SearchResult) => r.url);
+}
+
+export async function hybridSearch(query: string, count: number, signal?: AbortSignal): Promise<{ provider: string; results: SearchResult[]; fallbackReason?: string }> {
+  const key = loadFirecrawlApiKey();
+  if (key) {
+    try {
+      return { provider: "firecrawl", results: await firecrawlSearch(query, count, signal, key) };
+    } catch (err: any) {
+      const fallback = err?.fallback || ["TypeError", "AbortError"].includes(err?.name) || /fetch|network|timeout/i.test(String(err?.message));
+      if (!fallback) throw err;
+      return { provider: "duckduckgo-html", results: await duckDuckGoSearch(query, count, signal), fallbackReason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  return { provider: "duckduckgo-html", results: await duckDuckGoSearch(query, count, signal), fallbackReason: "FIRECRAWL_API_KEY not configured" };
 }
 
 function formatResults(results: SearchResult[]): string {
@@ -136,7 +223,7 @@ function quoteForSearch(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
-function buildSearchQuery(args: StructuredSearchArgs): BuiltSearchQuery {
+export function buildSearchQuery(args: StructuredSearchArgs): BuiltSearchQuery {
   const baseQuery = cleanQuery(args.query);
   const exactPhrases = cleanItems(args.exactPhrases);
   const excludeTerms = cleanItems(args.excludeTerms);
@@ -152,7 +239,9 @@ function buildSearchQuery(args: StructuredSearchArgs): BuiltSearchQuery {
   for (const term of excludeTerms) parts.push(`-${term.includes(" ") ? quoteForSearch(term) : term}`);
   if (site) parts.push(`site:${site}`);
 
-  return { query: parts.join(" "), baseQuery, exactPhrases, excludeTerms, site };
+  const query = parts.join(" ");
+  if (query.length > 2_000) throw new Error("Composed search query exceeds 2,000 characters.");
+  return { query, baseQuery, exactPhrases, excludeTerms, site };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -160,38 +249,39 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web using DuckDuckGo's no-key HTML endpoint. Build one search per call from a base query string, exact phrases, exclusions, and an optional site. Returns title, URL, and snippet.",
+      "Search the web using Firecrawl when FIRECRAWL_API_KEY is configured, with DuckDuckGo HTML fallback. Build one search per call from query, exact phrases, exclusions, optional site, and count.",
     promptSnippet:
-      "Search the web via DuckDuckGo using query plus optional exactPhrases, excludeTerms, and site. Use one tool call per search angle.",
+      "Search the web via Firecrawl when configured, otherwise DuckDuckGo, using query plus optional exactPhrases, excludeTerms, and site. Use one tool call per search angle.",
     promptGuidelines: [
       "Use exactPhrases for exact phrase matching instead of embedding quote marks inside the main query string.",
       "Use one web_search tool call per search angle instead of batching multiple searches into one call.",
-      "web_search uses a no-key DuckDuckGo HTML endpoint; if results are sparse, try a simpler query or a site-restricted query.",
+      "web_search falls back to DuckDuckGo on missing Firecrawl key/quota/rate/auth/network/server failure; if results are sparse, try a simpler query or a site-restricted query.",
     ],
 
     parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Base search query as a normal string." })),
-      exactPhrases: Type.Optional(Type.Array(Type.String({ description: "Exact phrases to match." }))),
-      excludeTerms: Type.Optional(Type.Array(Type.String({ description: "Terms or phrases to exclude." }))),
-      site: Type.Optional(Type.String({ description: "Optional site/domain restriction, such as example.com." })),
+      query: Type.Optional(Type.String({ description: "Base search query as a normal string.", maxLength: 1_000 })),
+      exactPhrases: Type.Optional(Type.Array(Type.String({ description: "Exact phrases to match.", maxLength: 500 }), { maxItems: 20 })),
+      excludeTerms: Type.Optional(Type.Array(Type.String({ description: "Terms or phrases to exclude.", maxLength: 500 }), { maxItems: 20 })),
+      site: Type.Optional(Type.String({ description: "Optional site/domain restriction, such as example.com.", maxLength: 500 })),
       count: Type.Optional(Type.Number({ description: "Number of results to return (default: 5, max: 10)", minimum: 1, maximum: 10 })),
     }),
 
     async execute(_toolCallId, params: StructuredSearchArgs, signal) {
       const count = Math.max(1, Math.min(params.count ?? 5, 10));
       const built = buildSearchQuery(params);
-      const results = await duckDuckGoSearch(built.query, count, signal);
+      const search = await hybridSearch(built.query, count, signal);
 
       return {
-        content: [{ type: "text" as const, text: formatResults(results) }],
+        content: [{ type: "text" as const, text: formatResults(search.results) }],
         details: {
-          provider: "duckduckgo-html",
+          provider: search.provider,
+          fallbackReason: search.fallbackReason,
           composedQuery: built.query,
           query: built.baseQuery,
           exactPhrases: built.exactPhrases,
           excludeTerms: built.excludeTerms,
           site: built.site,
-          resultCount: results.length,
+          resultCount: search.results.length,
         },
       };
     },

@@ -77,8 +77,6 @@ Keep machine-local/private files outside the repo, for example:
    ~/.pi/agent/AGENTS.md -> ~/.pi/agent/pi-config/AGENTS.md
    ```
 
-   The extension also repairs these symlinks on Pi startup, but running the bootstrap script makes the first startup deterministic.
-
 4. Restart Pi, or run `/reload` from inside Pi.
 
 5. Make sure `~/.pi/agent/settings.json` points at this package:
@@ -129,9 +127,19 @@ Example:
   "worktreesDir": "../worktrees",
   "pushNewBranches": true,
   "deleteLocalBranches": true,
-  "deleteRemoteBranches": false
+  "deleteRemoteBranches": false,
+  "copyFromPrimary": [".env.local"],
+  "bootstrapCommands": ["npm install"],
+  "verifyPaths": ["node_modules"],
+  "verifyCommands": ["npm test"],
+  "ticket": {
+    "branchTemplate": "{type}/{key}-{slug}",
+    "pathTemplate": "{key}-{slug}"
+  }
 }
 ```
+
+The `worktree_create` tool uses the same service as the commands, so ticket skills do not need to duplicate Git or bootstrap logic. Bootstrap commands execute only after the user explicitly invokes worktree creation; keep them project-specific and reviewable.
 
 Use that project-local config for organization-specific behavior. Keep `generic-worktrees.ts` abstract and only change it when the common workflow itself is wrong.
 
@@ -143,23 +151,45 @@ Environment variables are also supported for portable defaults:
 - `PI_WORKTREE_DELETE_LOCAL_BRANCHES=0`
 - `PI_WORKTREE_DELETE_REMOTE_BRANCHES=1`
 
-## Updating this config
+## Orchestration and local reporting
 
-Inside Pi, use the package commands from `extensions/pi-config-git.ts`:
+The vendored Davis orchestration package provides background Pi, Claude, and Codex agents, takeover UI, workflows, private run artifacts, and the dashboard. The default profile is read-only:
 
-```text
-/pi-config-status
-/pi-config-pull
-/pi-config-push
+- `scout`: local read/search only
+- `researcher`: read/search plus web tools
+- `worker`: writes restricted to the current project; no shell tool
+- `unrestricted`: explicit per-spawn interactive confirmation; rejected headlessly
+
+See [`vendor/davis/UPSTREAM.md`](vendor/davis/UPSTREAM.md) and [`vendor/davis/PATCHES.md`](vendor/davis/PATCHES.md) before syncing upstream.
+
+Other commands and tools:
+
+- `/wayfinder` opens the cockpit for live repository epics and Wayfinder-labelled maps, complete issue context, persistent workspace settings, and linked foreground/background agent sessions. `Alt+W` opens the cockpit; `Alt+A` opens Agent activity. Configuration and run associations live privately under `~/.pi/agent/wayfinder/`; tracker content remains canonical in the configured issue tracker.
+- `/usage` (or `Alt+U`) opens a refreshable quota overlay with progress bars. It is safe during an active run and never writes to the transcript or model context.
+- `/cost [today|7d|30d|all]` (or `Alt+C`) opens local API-equivalent history in a period-switchable overlay with model totals and proportional cost bars.
+- `/lg` opens `hunk diff --watch` in macOS Terminal at the exact current worktree.
+- `web_search` uses Firecrawl when a local key is available and falls back to DuckDuckGo.
+- `web_fetch` tries bounded direct HTTP first, then Firecrawl for difficult pages.
+
+Keep `FIRECRAWL_API_KEY` and `~/.pi/agent/private/` local and untracked. `bin/claude-statusline.mjs` is an optional cache-aware status-line helper; installing it into Claude settings is a separate host-level action.
+
+## Development and updates
+
+Use explicit Git operations or Pi's installation-native package update flow. This package intentionally has no auto-commit or auto-push command.
+
+```bash
+npm install
+npm run typecheck
+npm test
 ```
 
-What they do:
+The quota-consuming Claude/Codex integration tests are intentionally separate:
 
-- `/pi-config-status` shows git status for the installed package checkout.
-- `/pi-config-pull` runs `git pull --ff-only` for the installed package checkout.
-- `/pi-config-push` commits local package changes with a `pi config:` commit message, then pushes to GitHub.
+```bash
+npm run test:live
+```
 
-After pulling changes, run `/reload` or restart Pi so resources are refreshed.
+Run them only with explicit approval. After pulling package changes, run `/reload` or restart Pi.
 
 ## Manual git commands
 

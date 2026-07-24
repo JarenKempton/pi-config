@@ -1,5 +1,7 @@
-import { spawn } from "node:child_process";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  copyToClipboard,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 
 function textFromContent(content: unknown) {
   if (typeof content === "string") return content;
@@ -24,28 +26,6 @@ function textFromContent(content: unknown) {
     })
     .filter(Boolean)
     .join("\n");
-}
-
-function copyToClipboard(text: string) {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn("pbcopy");
-    let stderr = "";
-
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(stderr.trim() || `pbcopy exited with code ${code}`));
-      }
-    });
-
-    child.stdin.end(text);
-  });
 }
 
 export default function (pi: ExtensionAPI) {

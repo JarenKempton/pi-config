@@ -1,0 +1,50 @@
+{
+  "name": "jaren-pi-config",
+  "version": "0.0.0-private",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package"],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test --experimental-strip-types vendor/davis/extensions/subagents/by-the-way.test.ts vendor/davis/extensions/subagents/context-usage.test.ts vendor/davis/extensions/subagents/manager.test.ts vendor/davis/extensions/subagents/permissions.test.ts vendor/davis/extensions/subagents/result-delivery.test.ts vendor/davis/extensions/subagents/takeover.test.ts vendor/davis/extensions/shared/*.test.ts vendor/davis/extensions/workflows/*.test.ts vendor/davis/extensions/git-info/*.test.ts extensions/worktrees/*.test.ts tests/*.test.ts",
+    "test:live": "node --test --experimental-strip-types vendor/davis/extensions/subagents/claude.test.ts vendor/davis/extensions/subagents/codex.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.218",
+    "@effect/platform-node": "4.0.0-beta.101",
+    "acorn": "8.17.0",
+    "effect": "4.0.0-beta.101",
+    "undici": "7.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "ini": "6.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/*.ts",
+      "./extensions/web-search/index.ts",
+      "./vendor/davis/extensions/subagents/index.ts",
+      "./vendor/davis/extensions/workflows/index.ts",
+      "./vendor/davis/extensions/model-info/index.ts",
+      "./vendor/davis/extensions/git-info/index.ts",
+      "./vendor/davis/extensions/ui-customization/index.ts"
+    ],
+    "skills": [
+      "./skills",
+      "./vendor/davis/skills/subagents/SKILL.md"
+    ],
+    "themes": ["./themes"],
+    "prompts": []
+  }
+}
