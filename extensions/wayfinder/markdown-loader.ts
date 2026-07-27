@@ -13,6 +13,7 @@ import type {
 } from "./types.ts";
 
 const SKIPPED_DIRECTORIES = new Set([
+  ".claude",
   ".git",
   ".next",
   ".nx",

@@ -23,6 +23,7 @@ import {
   loadGitHubWayfinderData,
   resolveRepositoryRoot,
 } from "./github-loader.ts";
+import { loadJiraWayfinderData } from "./jira-loader.ts";
 import {
   discoverMarkdownMapFiles,
   loadMarkdownWayfinderData,
@@ -53,6 +54,14 @@ import {
 import type { SubagentSnapshot } from "../../vendor/davis/extensions/subagents/src/domain.ts";
 
 let cockpitOpen = false;
+
+export function filterCachedMaps(maps: CockpitData["maps"]) {
+  return maps.filter(
+    (map) =>
+      map.source?.provider !== "markdown" ||
+      !/(^|\/)\.claude\//.test(map.source.id),
+  );
+}
 
 function backend(runtime: AgentRuntimeId) {
   return runtime === "Pi" ? "pi" : runtime === "Claude" ? "claude" : "codex";
@@ -95,6 +104,10 @@ export class WayfinderCockpitComponent {
   private settings: WorkspaceSettings;
   private unsubscribe?: () => void;
   private pollTimer?: NodeJS.Timeout;
+  private refreshLoader?: (trackerId: string) => Promise<{
+    trackerData: CockpitData;
+    agentCatalog: CockpitData["agentCatalog"];
+  }>;
   private disposed = false;
 
   constructor(options: {
@@ -108,7 +121,7 @@ export class WayfinderCockpitComponent {
     workspaceRoot: string;
     host: SubagentHostBridge | undefined;
     initialScreen?: "maps" | "agents";
-    refreshData?: () => Promise<{
+    refreshData?: (trackerId: string) => Promise<{
       trackerData: CockpitData;
       agentCatalog: CockpitData["agentCatalog"];
     }>;
@@ -131,11 +144,12 @@ export class WayfinderCockpitComponent {
       void this.refreshPersistedRuns();
     }, 1_500);
     this.pollTimer.unref();
-    if (options.refreshData) void this.refreshData(options.refreshData);
+    this.refreshLoader = options.refreshData;
+    if (this.refreshLoader) void this.refreshData(this.refreshLoader);
   }
 
   private async refreshData(
-    loader: () => Promise<{
+    loader: (trackerId: string) => Promise<{
       trackerData: CockpitData;
       agentCatalog: CockpitData["agentCatalog"];
     }>,
@@ -144,7 +158,7 @@ export class WayfinderCockpitComponent {
     const previousTicketId = this.state.selectedTicketId;
     const previousActivityId = buildActivityItems(this.data)[this.state.agentIndex]?.id;
     try {
-      const { trackerData, agentCatalog } = await loader();
+      const { trackerData, agentCatalog } = await loader(this.settings.trackerId);
       if (this.disposed) return;
       this.data = {
         ...trackerData,
@@ -307,7 +321,11 @@ export class WayfinderCockpitComponent {
 
     if (screen === "tracker-settings") {
       const tracker = this.data.trackers[trackerIndex];
-      if (tracker?.id !== "github" && tracker?.id !== "markdown") {
+      if (
+        tracker?.id !== "github" &&
+        tracker?.id !== "jira" &&
+        tracker?.id !== "markdown"
+      ) {
         this.ctx.ui.notify(
           `${tracker?.label ?? "This tracker"} is visualized but its production adapter is not installed yet.`,
           "warning",
@@ -332,7 +350,11 @@ export class WayfinderCockpitComponent {
       if (!tracker) return;
       this.settings.trackerId = tracker.id;
       this.data.configuredTrackerId = tracker.id;
+      this.data.maps = [];
+      this.data.trackerRefresh = { state: "loading" };
+      this.state = { ...initialState(this.data), screen: "maps" };
       void this.persistSettings();
+      if (this.refreshLoader) void this.refreshData(this.refreshLoader);
       return;
     }
 
@@ -480,7 +502,7 @@ export class WayfinderCockpitComponent {
         ticket.trackerState === "open"
           ? ticket.source?.provider === "github"
             ? "This will claim the GitHub ticket before the agent starts."
-            : "The local Markdown remains canonical and will not be rewritten."
+            : "The canonical tracker remains unchanged; only the local agent association is recorded."
           : "The ticket is already claimed or resolved.",
       ].join("\n"),
     );
@@ -783,10 +805,15 @@ export async function showWayfinderCockpit(
         loadTrackerCache(workspaceKey),
         loadRuns(workspaceKey),
       ]);
+      const cachedMaps = filterCachedMaps(cached?.maps ?? []);
+      const cachedMatchesTracker = Boolean(
+        cachedMaps.length &&
+          cachedMaps.every((map) => map.source?.provider === activeTrackerId),
+      );
       data = {
         ...defaultData,
-        ...(cached
-          ? { maps: cached.maps, trackers: cached.trackers }
+        ...(cachedMatchesTracker && cached
+          ? { maps: cachedMaps, trackers: cached.trackers }
           : { maps: [] }),
         routes: settings.routes.map((route) => ({ ...route })),
         agentDefaults: {
@@ -798,7 +825,7 @@ export async function showWayfinderCockpit(
         settingsPath: settingsPath(),
         settingsPersisted: persisted,
         runs,
-        trackerRefresh: cached
+        trackerRefresh: cachedMatchesTracker && cached
           ? { state: "refreshing", updatedAt: cached.savedAt }
           : { state: "loading" },
       };
@@ -811,15 +838,17 @@ export async function showWayfinderCockpit(
     }
 
     const host = getSubagentHost();
-    const refreshData = async () => {
+    const refreshData = async (trackerId: string) => {
       const trackerLoader =
-        activeTrackerId === "markdown"
+        trackerId === "markdown"
           ? loadMarkdownWayfinderData
-          : activeTrackerId === "github"
+          : trackerId === "github"
             ? loadGitHubWayfinderData
-            : undefined;
+            : trackerId === "jira"
+              ? loadJiraWayfinderData
+              : undefined;
       if (!trackerLoader) {
-        throw new Error(`The ${activeTrackerId} Wayfinder adapter is not installed.`);
+        throw new Error(`The ${trackerId} Wayfinder adapter is not installed.`);
       }
       const [trackerData, agentCatalog] = await Promise.all([
         trackerLoader(repositoryRoot, defaultData),

@@ -388,8 +388,8 @@ export const defaultData: CockpitData = {
       id: "jira",
       label: "Jira",
       repositoryLabel: "site / project key",
-      instructions: "docs/agents/issue-tracker.md",
-      auth: "adapter not installed",
+      instructions: "WAYFINDER_JIRA_MAP_JQL (optional)",
+      auth: "Atlassian CLI (`acli`) required",
       capabilities: [
         { label: "Maps / child tickets", value: "issue hierarchy", available: true },
         { label: "Dependencies", value: "issue links", available: true },

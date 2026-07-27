@@ -12,14 +12,23 @@ import {
   isMapRoot,
   parseMarkdownSections,
 } from "../extensions/wayfinder/github-loader.ts";
-import { loadMarkdownWayfinderData } from "../extensions/wayfinder/markdown-loader.ts";
+import {
+  loadJiraWayfinderData,
+  mapFromJira,
+} from "../extensions/wayfinder/jira-loader.ts";
+import {
+  discoverMarkdownMapFiles,
+  loadMarkdownWayfinderData,
+} from "../extensions/wayfinder/markdown-loader.ts";
 import { renderCockpit } from "../extensions/wayfinder/render.ts";
 import {
   initialState,
   presentationState,
   reduceCockpit,
 } from "../extensions/wayfinder/state.ts";
-import wayfinderExtension from "../extensions/wayfinder/index.ts";
+import wayfinderExtension, {
+  filterCachedMaps,
+} from "../extensions/wayfinder/index.ts";
 import type { CockpitData } from "../extensions/wayfinder/types.ts";
 
 const theme = {
@@ -81,6 +90,122 @@ test("local Markdown maps load their adjacent issue ledger without tracker confi
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Markdown discovery ignores nested worktree copies of the canonical map", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "wayfinder-worktrees-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    const canonical = path.join(root, "wayfinder", "delivery");
+    const copy = path.join(
+      root,
+      ".claude",
+      "worktrees",
+      "old-agent",
+      "wayfinder",
+      "delivery",
+    );
+    await mkdir(canonical, { recursive: true });
+    await mkdir(copy, { recursive: true });
+    await writeFile(path.join(canonical, "map.md"), "# Canonical map\n");
+    await writeFile(path.join(copy, "map.md"), "# Canonical map\n");
+
+    const maps = await discoverMarkdownMapFiles(root);
+    assert.deepEqual(maps, [path.join(canonical, "map.md")]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("stale cache filtering removes previously indexed worktree maps", () => {
+  const canonical = structuredClone(defaultData.maps[0]!);
+  canonical.source = {
+    provider: "markdown",
+    id: "wayfinder/delivery/map.md",
+    url: "file:///repo/wayfinder/delivery/map.md",
+    canonical: true,
+  };
+  const worktree = structuredClone(canonical);
+  worktree.source!.id = ".claude/worktrees/old/wayfinder/delivery/map.md";
+
+  assert.deepEqual(filterCachedMaps([worktree, canonical]), [canonical]);
+});
+
+test("Jira epics become one map with child work items and blocker state", () => {
+  const map = mapFromJira(
+    {
+      key: "TEAM-10",
+      self: "https://example.atlassian.net/rest/api/3/issue/10010",
+      fields: {
+        summary: "Ship the migration",
+        description: {
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Move safely." }] }],
+        },
+        status: { name: "In Progress", statusCategory: { key: "indeterminate" } },
+        issuetype: { name: "Epic" },
+        updated: "2026-07-27T12:00:00.000Z",
+      },
+    },
+    [
+      {
+        key: "TEAM-11",
+        self: "https://example.atlassian.net/rest/api/3/issue/10011",
+        fields: {
+          summary: "Build the adapter",
+          description: "Use Jira as the canonical tracker.",
+          status: { name: "To Do", statusCategory: { key: "new" } },
+          assignee: { displayName: "Jaren" },
+          issuetype: { name: "Story" },
+          labels: ["research"],
+          updated: "2026-07-27T13:00:00.000Z",
+          issuelinks: [
+            {
+              type: { name: "Blocks" },
+              inwardIssue: {
+                key: "TEAM-9",
+                fields: {
+                  summary: "Choose the migration path",
+                  status: { statusCategory: { key: "done" } },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ],
+  );
+
+  assert.equal(map.id, "jira:TEAM-10");
+  assert.equal(map.source?.provider, "jira");
+  assert.equal(map.url, "https://example.atlassian.net/browse/TEAM-10");
+  assert.equal(map.tickets.length, 1);
+  assert.equal(map.tickets[0]?.id, "TEAM-11");
+  assert.equal(map.tickets[0]?.trackerState, "claimed");
+  assert.equal(map.tickets[0]?.mode, "AFK");
+  assert.deepEqual(map.tickets[0]?.dependencies, [
+    { id: "TEAM-9", title: "Choose the migration path", state: "closed" },
+  ]);
+  assert.deepEqual(map.tickets[0]?.blockedBy, []);
+});
+
+test("Jira loader checks auth and loads epic children through ACLI JSON", async () => {
+  const calls: string[][] = [];
+  const data = await loadJiraWayfinderData("/repo", structuredClone(defaultData), async (args) => {
+    calls.push(args);
+    if (args.includes("status")) return "Authenticated";
+    const jql = args[args.indexOf("--jql") + 1];
+    if (jql?.startsWith("parent =")) {
+      return JSON.stringify({ issues: [{ key: "TEAM-11", fields: { summary: "Child" } }] });
+    }
+    return JSON.stringify({ issues: [{ key: "TEAM-10", fields: { summary: "Epic" } }] });
+  });
+
+  assert.equal(data.maps.length, 1);
+  assert.equal(data.maps[0]?.tickets[0]?.id, "TEAM-11");
+  assert.deepEqual(calls[0], ["jira", "auth", "status"]);
+  assert.ok(calls[1]?.includes("--json"));
+  assert.ok(calls[2]?.includes("parent = TEAM-10 ORDER BY rank"));
 });
 
 test("repository epics and Wayfinder maps are both map roots", () => {

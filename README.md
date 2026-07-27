@@ -165,7 +165,7 @@ See [`vendor/davis/UPSTREAM.md`](vendor/davis/UPSTREAM.md) and [`vendor/davis/PA
 Other commands and tools:
 
 - `/subagents` (or `Alt+S`) opens the background-agent list and takeover view in a bounded modal. It remains available while the parent agent is running.
-- `/wayfinder` opens the cockpit for live repository epics, Wayfinder-labelled issues, or local `map.md`/`wayfinder.md` maps with an adjacent `issues/` ledger. `Alt+W` opens the cockpit; `Alt+A` opens Agent activity. Configuration and run associations live privately under `~/.pi/agent/wayfinder/`; tracker content remains canonical in the configured issue tracker or Markdown files.
+- `/wayfinder` opens the cockpit for Jira or GitHub epics, Wayfinder-labelled issues, or local `map.md`/`wayfinder.md` maps with an adjacent `issues/` ledger. `Alt+W` opens the cockpit; `Alt+A` opens Agent activity. Jira uses the official `acli` client and supports an optional `WAYFINDER_JIRA_MAP_JQL` map-root query. Configuration and run associations live privately under `~/.pi/agent/wayfinder/`; tracker content remains canonical in the configured issue tracker or Markdown files.
 - `/usage` (or `Alt+U`) opens a refreshable quota overlay with progress bars. It is safe during an active run and never writes to the transcript or model context. Compact quota windows also appear in the footer.
 - `/cost [today|7d|30d|all]` (or `Alt+C`) opens local API-equivalent history in a period-switchable overlay with model totals and proportional cost bars. The footer separately shows current-chat cost, current-session subagent cost, and today's cross-model local tally.
 - `/lg` opens `hunk diff --watch` in macOS Terminal at the exact current worktree.
