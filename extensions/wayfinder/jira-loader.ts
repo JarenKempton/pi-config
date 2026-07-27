@@ -43,8 +43,10 @@ type AcliRunner = (args: string[], cwd: string) => Promise<string>;
 
 const DEFAULT_MAP_JQL =
   'issuetype = Epic AND statusCategory != Done ORDER BY updated DESC';
+// ACLI search accepts a smaller field set than `workitem view`; requesting
+// updated, parent, or issuelinks makes the entire search fail.
 const SEARCH_FIELDS =
-  "key,summary,description,status,assignee,issuetype,labels,updated,parent,issuelinks";
+  "key,summary,description,status,assignee,issuetype,labels";
 
 function runAcli(args: string[], cwd: string) {
   return new Promise<string>((resolve, reject) => {

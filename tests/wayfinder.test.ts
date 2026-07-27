@@ -205,6 +205,11 @@ test("Jira loader checks auth and loads epic children through ACLI JSON", async 
   assert.equal(data.maps[0]?.tickets[0]?.id, "TEAM-11");
   assert.deepEqual(calls[0], ["jira", "auth", "status"]);
   assert.ok(calls[1]?.includes("--json"));
+  const fields = calls[1]?.[calls[1].indexOf("--fields") + 1] ?? "";
+  assert.equal(fields, "key,summary,description,status,assignee,issuetype,labels");
+  assert.ok(!fields.includes("updated"));
+  assert.ok(!fields.includes("parent"));
+  assert.ok(!fields.includes("issuelinks"));
   assert.ok(calls[2]?.includes("parent = TEAM-10 ORDER BY rank"));
 });
 
