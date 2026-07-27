@@ -698,11 +698,17 @@ function settingsMenu(
 ) {
   const delivery = data.deliveryProfiles[state.deliveryProfileIndex]!;
   const tracker = data.trackers[state.trackerIndex]!;
+  const jiraBoard = data.jiraBoards?.find(
+    (board) => board.id === data.configuredJiraBoardId,
+  );
   const items = [
     ["Delivery workflow", delivery.label],
     ["Agent defaults", "Pi · inherited model"],
     ["Model routing", `${data.routes.length} ordered rules`],
-    ["Issue tracker", tracker.label],
+    [
+      "Issue tracker",
+      `${tracker.label}${tracker.id === "jira" && jiraBoard ? ` · ${jiraBoard.name}` : ""}`,
+    ],
     ["Automation & safety", "Ask before map mutations"],
   ];
   const descriptions = [
@@ -899,19 +905,42 @@ function trackerSettings(
 ) {
   const tracker = data.trackers[state.trackerIndex]!;
   const aligned = tracker.id === data.configuredTrackerId;
+  const jiraBoard =
+    tracker.id === "jira"
+      ? data.jiraBoards?.[state.jiraBoardIndex]
+      : undefined;
   const list = [section(theme, "ISSUE TRACKER"), ""];
   data.trackers.forEach((item, index) => {
     const selected = index === state.trackerIndex;
     list.push(`${selected ? theme.fg("accent", "›") : " "} ${selected ? theme.bold(item.label) : item.label}`);
     list.push(`    ${theme.fg("dim", item.auth)}`);
   });
+  if (tracker.id === "jira") {
+    list.push("", section(theme, "JIRA BOARD"));
+    if (data.jiraBoards?.length) {
+      data.jiraBoards.forEach((board, index) => {
+        const selected = index === state.jiraBoardIndex;
+        const applied = board.id === data.configuredJiraBoardId;
+        list.push(
+          `${selected ? theme.fg("accent", "›") : " "} ${applied ? theme.fg("success", "✓") : " "} ${selected ? theme.bold(board.name) : board.name}`,
+        );
+        list.push(`      ${theme.fg("dim", `${board.location} · ${board.type}`)}`);
+      });
+      list.push("", theme.fg("dim", "Use ←/→ to select a Jira board."));
+    } else {
+      list.push(theme.fg("warning", "  Boards are loading or unavailable."));
+    }
+  }
   const detail = [
     section(theme, "ADAPTER PREVIEW"),
     theme.bold(tracker.label),
     "",
     `Wayfinder skill       ${theme.fg("success", "● configured")}`,
     `Tracker instructions  ${tracker.instructions}`,
-    `Repository / project  ${tracker.repositoryLabel}`,
+    `Repository / project  ${jiraBoard?.projectKeys.join(", ") || tracker.repositoryLabel}`,
+    ...(tracker.id === "jira"
+      ? [`Jira board            ${jiraBoard?.name ?? "No board available"}`]
+      : []),
     `Configuration status  ${aligned ? theme.fg("success", "● aligned") : theme.fg("warning", "● differs from repository instructions")}`,
     "",
     section(theme, "CAPABILITIES"),
@@ -920,7 +949,7 @@ function trackerSettings(
         `  ${capability.available ? theme.fg("success", "●") : theme.fg("muted", "○")} ${capability.label} · ${capability.value}`,
     ),
     "",
-    theme.fg("dim", "Press Enter to persist this tracker adapter."),
+    theme.fg("dim", `Press Enter to persist this tracker${tracker.id === "jira" ? " and board" : ""}.`),
     theme.fg("dim", "Credentials remain in the provider CLI or environment."),
   ];
   if (width >= 82) return columns(list, detail, width, Math.floor(width * 0.4), theme);
@@ -1064,7 +1093,7 @@ function footer(state: CockpitState) {
   if (state.screen === "delivery-settings") return "↑↓ select · enter apply · esc back · q close";
   if (state.screen === "agent-settings") return "↑↓ select · enter edit · esc back · q close";
   if (state.screen === "routing-settings") return "↑↓ select · enter open · esc back · q close";
-  if (state.screen === "tracker-settings") return "↑↓ select · enter apply · esc back · q close";
+  if (state.screen === "tracker-settings") return "↑↓ tracker · ←→ Jira board · enter apply · esc back · q close";
   if (state.screen === "automation-settings") return "↑↓ select · enter edit · esc back · q close";
   if (state.screen === "rule-editor" || state.screen === "agent-editor") return "↑↓ field · ←→ allowed value · enter accept · esc cancel";
   if (state.screen === "simulator") return "↑↓ sample · esc back · q close";

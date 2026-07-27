@@ -23,7 +23,7 @@ import {
   loadGitHubWayfinderData,
   resolveRepositoryRoot,
 } from "./github-loader.ts";
-import { loadJiraWayfinderData } from "./jira-loader.ts";
+import { loadJiraBoards, loadJiraWayfinderData } from "./jira-loader.ts";
 import {
   discoverMarkdownMapFiles,
   loadMarkdownWayfinderData,
@@ -162,6 +162,7 @@ export class WayfinderCockpitComponent {
       if (this.disposed) return;
       this.data = {
         ...trackerData,
+        jiraBoards: trackerData.jiraBoards ?? this.data.jiraBoards,
         routes: this.settings.routes.map((route) => ({ ...route })),
         agentCatalog,
         agentDefaults: {
@@ -171,6 +172,7 @@ export class WayfinderCockpitComponent {
         configuredDeliveryProfileId:
           this.settings.deliveryProfileId || undefined,
         configuredTrackerId: this.settings.trackerId,
+        configuredJiraBoardId: this.settings.jiraBoardId,
         settingsPath: settingsPath(),
         settingsPersisted: this.data.settingsPersisted,
         runs: this.data.runs,
@@ -195,6 +197,12 @@ export class WayfinderCockpitComponent {
         ...this.state,
         mapIndex,
         agentIndex,
+        jiraBoardIndex: Math.max(
+          0,
+          this.data.jiraBoards?.findIndex(
+            (board) => board.id === this.settings.jiraBoardId,
+          ) ?? 0,
+        ),
         selectedTicketId:
           map?.tickets.some((ticket) => ticket.id === previousTicketId)
             ? previousTicketId
@@ -316,6 +324,7 @@ export class WayfinderCockpitComponent {
     const draft = this.state.draftRule ? { ...this.state.draftRule } : undefined;
     const deliveryCursor = this.state.deliveryCursor;
     const trackerIndex = this.state.trackerIndex;
+    const jiraBoardIndex = this.state.jiraBoardIndex;
     const ruleIndex = this.state.ruleIndex;
     const agentDefaultIndex = this.state.agentDefaultIndex;
 
@@ -348,8 +357,22 @@ export class WayfinderCockpitComponent {
     if (screen === "tracker-settings") {
       const tracker = this.data.trackers[trackerIndex];
       if (!tracker) return;
+      const board = tracker.id === "jira"
+        ? this.data.jiraBoards?.[jiraBoardIndex]
+        : undefined;
+      if (tracker.id === "jira" && !board) {
+        this.ctx.ui.notify(
+          "Select an available Jira board before applying Jira.",
+          "warning",
+        );
+        return;
+      }
       this.settings.trackerId = tracker.id;
       this.data.configuredTrackerId = tracker.id;
+      if (board) {
+        this.settings.jiraBoardId = board.id;
+        this.data.configuredJiraBoardId = board.id;
+      }
       this.data.maps = [];
       this.data.trackerRefresh = { state: "loading" };
       this.state = { ...initialState(this.data), screen: "maps" };
@@ -808,12 +831,18 @@ export async function showWayfinderCockpit(
       const cachedMaps = filterCachedMaps(cached?.maps ?? []);
       const cachedMatchesTracker = Boolean(
         cachedMaps.length &&
-          cachedMaps.every((map) => map.source?.provider === activeTrackerId),
+          cachedMaps.every((map) => map.source?.provider === activeTrackerId) &&
+          (activeTrackerId !== "jira" ||
+            cached?.configuredJiraBoardId === settings.jiraBoardId),
       );
       data = {
         ...defaultData,
         ...(cachedMatchesTracker && cached
-          ? { maps: cachedMaps, trackers: cached.trackers }
+          ? {
+              maps: cachedMaps,
+              trackers: cached.trackers,
+              jiraBoards: cached.jiraBoards,
+            }
           : { maps: [] }),
         routes: settings.routes.map((route) => ({ ...route })),
         agentDefaults: {
@@ -822,6 +851,7 @@ export async function showWayfinderCockpit(
         },
         configuredDeliveryProfileId: settings.deliveryProfileId || undefined,
         configuredTrackerId: activeTrackerId,
+        configuredJiraBoardId: settings.jiraBoardId,
         settingsPath: settingsPath(),
         settingsPersisted: persisted,
         runs,
@@ -839,21 +869,31 @@ export async function showWayfinderCockpit(
 
     const host = getSubagentHost();
     const refreshData = async (trackerId: string) => {
-      const trackerLoader =
+      const trackerPromise =
         trackerId === "markdown"
-          ? loadMarkdownWayfinderData
+          ? loadMarkdownWayfinderData(repositoryRoot, defaultData)
           : trackerId === "github"
-            ? loadGitHubWayfinderData
+            ? loadGitHubWayfinderData(repositoryRoot, defaultData)
             : trackerId === "jira"
-              ? loadJiraWayfinderData
+              ? loadJiraWayfinderData(
+                  repositoryRoot,
+                  defaultData,
+                  undefined,
+                  settings.jiraBoardId,
+                )
               : undefined;
-      if (!trackerLoader) {
+      if (!trackerPromise) {
         throw new Error(`The ${trackerId} Wayfinder adapter is not installed.`);
       }
-      const [trackerData, agentCatalog] = await Promise.all([
-        trackerLoader(repositoryRoot, defaultData),
+      const [trackerData, agentCatalog, availableJiraBoards] = await Promise.all([
+        trackerPromise,
         loadAgentCatalog(ctx),
+        trackerId === "jira"
+          ? Promise.resolve(undefined)
+          : loadJiraBoards(repositoryRoot).catch(() => undefined),
       ]);
+      if (availableJiraBoards) trackerData.jiraBoards = availableJiraBoards;
+      trackerData.configuredJiraBoardId = settings.jiraBoardId;
       void saveTrackerCache(repositoryRoot, trackerData).catch((error) => {
         ctx.ui.notify(
           `Wayfinder cache could not be saved: ${error instanceof Error ? error.message : String(error)}`,

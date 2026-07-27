@@ -18,6 +18,7 @@ export interface AutomationConfig {
 
 export interface WorkspaceSettings {
   trackerId: string;
+  jiraBoardId: string;
   deliveryProfileId: string;
   agentDefaults: {
     HITL: AgentTarget;
@@ -41,6 +42,7 @@ const SETTINGS_PATH = path.join(SETTINGS_DIRECTORY, "settings.json");
 export function defaultWorkspaceSettings(routes: RoutingRule[]): WorkspaceSettings {
   return {
     trackerId: "github",
+    jiraBoardId: "6",
     deliveryProfileId: "",
     agentDefaults: {
       HITL: {
@@ -107,7 +109,9 @@ export async function loadWorkspaceSettings(
   const stored = document.workspaces[key];
   return {
     key,
-    settings: stored ?? defaultWorkspaceSettings(routes),
+    settings: stored
+      ? { ...stored, jiraBoardId: stored.jiraBoardId ?? "6" }
+      : defaultWorkspaceSettings(routes),
     persisted: Boolean(stored),
   };
 }

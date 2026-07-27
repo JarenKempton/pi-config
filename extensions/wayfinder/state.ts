@@ -36,6 +36,7 @@ export interface CockpitState {
   settingsIndex: number;
   settingsReturn: "maps" | "map" | "ticket" | "map-context";
   trackerIndex: number;
+  jiraBoardIndex: number;
   ruleIndex: number;
   agentDefaultIndex: number;
   automationIndex: number;
@@ -186,6 +187,12 @@ export function initialState(data: CockpitData): CockpitState {
     trackerIndex: Math.max(
       0,
       data.trackers.findIndex((tracker) => tracker.id === data.configuredTrackerId),
+    ),
+    jiraBoardIndex: Math.max(
+      0,
+      data.jiraBoards?.findIndex(
+        (board) => board.id === data.configuredJiraBoardId,
+      ) ?? 0,
     ),
     ruleIndex: 0,
     agentDefaultIndex: 0,
@@ -571,10 +578,27 @@ export function reduceCockpit(
         ),
       };
     }
-    if (action.type === "enter") {
+    if (
+      (action.type === "left" || action.type === "right") &&
+      data.trackers[clean.trackerIndex]?.id === "jira"
+    ) {
       return {
         ...clean,
-        notice: `${data.trackers[clean.trackerIndex]?.label ?? "Tracker"} selected`,
+        jiraBoardIndex: move(
+          clean.jiraBoardIndex,
+          action.type === "left" ? -1 : 1,
+          data.jiraBoards?.length ?? 0,
+        ),
+      };
+    }
+    if (action.type === "enter") {
+      const tracker = data.trackers[clean.trackerIndex];
+      const board = tracker?.id === "jira"
+        ? data.jiraBoards?.[clean.jiraBoardIndex]
+        : undefined;
+      return {
+        ...clean,
+        notice: `${tracker?.label ?? "Tracker"}${board ? ` · ${board.name}` : ""} selected`,
       };
     }
   }

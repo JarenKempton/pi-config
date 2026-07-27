@@ -189,28 +189,60 @@ test("Jira epics become one map with child work items and blocker state", () => 
   assert.deepEqual(map.tickets[0]?.blockedBy, []);
 });
 
-test("Jira loader checks auth and loads epic children through ACLI JSON", async () => {
+test("Jira loader scopes epic children to the selected ACLI board", async () => {
   const calls: string[][] = [];
   const data = await loadJiraWayfinderData("/repo", structuredClone(defaultData), async (args) => {
     calls.push(args);
     if (args.includes("status")) return "Authenticated";
+    if (args.includes("board") && args.includes("search")) {
+      return JSON.stringify({
+        values: [{ id: 6, name: "Jaren's Workbench", type: "simple", location: "JWB" }],
+      });
+    }
+    if (args.includes("list-projects")) {
+      return JSON.stringify({ projects: [{ key: "JWB" }] });
+    }
     const jql = args[args.indexOf("--jql") + 1];
     if (jql?.startsWith("parent =")) {
-      return JSON.stringify({ issues: [{ key: "TEAM-11", fields: { summary: "Child" } }] });
+      return JSON.stringify({ issues: [{ key: "JWB-11", fields: { summary: "Child" } }] });
     }
-    return JSON.stringify({ issues: [{ key: "TEAM-10", fields: { summary: "Epic" } }] });
-  });
+    return JSON.stringify({ issues: [{ key: "JWB-10", fields: { summary: "Epic" } }] });
+  }, "6");
 
   assert.equal(data.maps.length, 1);
-  assert.equal(data.maps[0]?.tickets[0]?.id, "TEAM-11");
+  assert.equal(data.maps[0]?.tickets[0]?.id, "JWB-11");
+  assert.equal(data.jiraBoards?.[0]?.name, "Jaren's Workbench");
+  assert.equal(data.configuredJiraBoardId, "6");
   assert.deepEqual(calls[0], ["jira", "auth", "status"]);
-  assert.ok(calls[1]?.includes("--json"));
-  const fields = calls[1]?.[calls[1].indexOf("--fields") + 1] ?? "";
+  const searches = calls.filter((args) => args.includes("workitem"));
+  assert.equal(
+    searches[0]?.[searches[0].indexOf("--jql") + 1],
+    'project in ("JWB") AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC',
+  );
+  const fields = searches[0]?.[searches[0].indexOf("--fields") + 1] ?? "";
   assert.equal(fields, "key,summary,description,status,assignee,issuetype,labels");
   assert.ok(!fields.includes("updated"));
   assert.ok(!fields.includes("parent"));
   assert.ok(!fields.includes("issuelinks"));
-  assert.ok(calls[2]?.includes("parent = TEAM-10 ORDER BY rank"));
+  assert.ok(searches[1]?.includes("parent = JWB-10 ORDER BY rank"));
+});
+
+test("Jira board selection cycles inside tracker settings", () => {
+  const data = structuredClone(defaultData);
+  data.configuredTrackerId = "jira";
+  data.configuredJiraBoardId = "6";
+  data.jiraBoards = [
+    { id: "1", name: "DEV board", type: "scrum", location: "RES", projectKeys: ["RES"] },
+    { id: "6", name: "Jaren's Workbench", type: "simple", location: "JWB", projectKeys: ["JWB"] },
+  ];
+  const state = { ...initialState(data), screen: "tracker-settings" as const };
+  assert.equal(state.jiraBoardIndex, 1);
+  assert.equal(reduceCockpit(state, { type: "left" }, data).jiraBoardIndex, 0);
+  assert.equal(reduceCockpit(state, { type: "right" }, data).jiraBoardIndex, 0);
+  const output = renderCockpit(state, data, theme, 120, 25).join("\n");
+  assert.match(output, /JIRA BOARD/);
+  assert.match(output, /Jaren's Workbench/);
+  assert.match(output, /←→ Jira board/);
 });
 
 test("repository epics and Wayfinder maps are both map roots", () => {

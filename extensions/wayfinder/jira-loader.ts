@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import type {
   CockpitData,
   DependencyRef,
+  JiraBoardOption,
   MapOutcome,
   Ticket,
   TicketType,
@@ -20,6 +21,17 @@ interface JiraIssueLink {
   type?: { name?: string; inward?: string; outward?: string };
   inwardIssue?: JiraWorkItem;
   outwardIssue?: JiraWorkItem;
+}
+
+interface AcliBoard {
+  id: string | number;
+  name?: string;
+  type?: string;
+  location?: string;
+}
+
+interface AcliProject {
+  key?: string;
 }
 
 export interface JiraWorkItem {
@@ -82,6 +94,16 @@ function parseJson(value: string) {
       `Atlassian CLI returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+function arrayField<T>(value: unknown, keys: string[]): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    if (Array.isArray(record[key])) return record[key] as T[];
+  }
+  return [];
 }
 
 export function jiraWorkItems(value: unknown): JiraWorkItem[] {
@@ -265,6 +287,59 @@ function jiraTrackers(defaults: CockpitData, maps: WayfinderMap[]): TrackerProfi
   return [configured, ...defaults.trackers.filter((tracker) => tracker.id !== "jira")];
 }
 
+export async function loadJiraBoards(
+  cwd: string,
+  runner: AcliRunner = runAcli,
+): Promise<JiraBoardOption[]> {
+  const boards = arrayField<AcliBoard>(
+    parseJson(
+      await runner(["jira", "board", "search", "--paginate", "--json"], cwd),
+    ),
+    ["values", "boards", "data"],
+  );
+  return Promise.all(
+    boards.map(async (board) => {
+      const projects = arrayField<AcliProject>(
+        parseJson(
+          await runner(
+            [
+              "jira",
+              "board",
+              "list-projects",
+              "--id",
+              String(board.id),
+              "--paginate",
+              "--json",
+            ],
+            cwd,
+          ),
+        ),
+        ["projects", "values", "data"],
+      );
+      return {
+        id: String(board.id),
+        name: board.name ?? `Board ${board.id}`,
+        type: board.type ?? "Jira",
+        location: board.location ?? "Jira",
+        projectKeys: projects.flatMap((project) =>
+          project.key ? [project.key] : [],
+        ),
+      };
+    }),
+  );
+}
+
+function boardMapJql(board: JiraBoardOption | undefined) {
+  if (!board) return DEFAULT_MAP_JQL;
+  if (!board.projectKeys.length) {
+    throw new Error(`Jira board ${board.name} has no associated projects.`);
+  }
+  const projects = board.projectKeys
+    .map((key) => `"${key.replaceAll('"', '\\"')}"`)
+    .join(", ");
+  return `project in (${projects}) AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC`;
+}
+
 async function search(jql: string, cwd: string, runner: AcliRunner) {
   const output = await runner(
     [
@@ -287,9 +362,20 @@ export async function loadJiraWayfinderData(
   cwd: string,
   defaults: CockpitData,
   runner: AcliRunner = runAcli,
+  boardId?: string,
 ): Promise<CockpitData> {
   await runner(["jira", "auth", "status"], cwd);
-  const mapJql = process.env.WAYFINDER_JIRA_MAP_JQL?.trim() || DEFAULT_MAP_JQL;
+  const jiraBoards = await loadJiraBoards(cwd, runner);
+  const configuredBoard = boardId
+    ? jiraBoards.find((board) => board.id === boardId)
+    : undefined;
+  if (boardId && !configuredBoard) {
+    throw new Error(
+      `Configured Jira board ${boardId} is not available to the authenticated account.`,
+    );
+  }
+  const mapJql =
+    process.env.WAYFINDER_JIRA_MAP_JQL?.trim() || boardMapJql(configuredBoard);
   const roots = await search(mapJql, cwd, runner);
   const maps = await Promise.all(
     roots.map(async (root) =>
@@ -306,5 +392,7 @@ export async function loadJiraWayfinderData(
     maps,
     discoveries: [],
     trackers: jiraTrackers(defaults, maps),
+    jiraBoards,
+    configuredJiraBoardId: configuredBoard?.id,
   };
 }

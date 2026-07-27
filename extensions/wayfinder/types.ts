@@ -179,6 +179,14 @@ export interface TrackerProfile {
   capabilities: Array<{ label: string; value: string; available: boolean }>;
 }
 
+export interface JiraBoardOption {
+  id: string;
+  name: string;
+  type: string;
+  location: string;
+  projectKeys: string[];
+}
+
 export interface WayfinderRun {
   id: string;
   mapId: string;
@@ -209,6 +217,8 @@ export interface CockpitData {
   agentDefaults?: { HITL: AgentTarget; AFK: AgentTarget };
   configuredDeliveryProfileId?: string;
   configuredTrackerId?: string;
+  jiraBoards?: JiraBoardOption[];
+  configuredJiraBoardId?: string;
   settingsPath?: string;
   settingsPersisted?: boolean;
   trackerRefresh?: {

@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { wayfinderDirectory } from "./config.ts";
-import type { CockpitData, TrackerProfile, WayfinderMap } from "./types.ts";
+import type {
+  CockpitData,
+  JiraBoardOption,
+  TrackerProfile,
+  WayfinderMap,
+} from "./types.ts";
 
 interface TrackerCacheDocument {
   version: 1;
@@ -10,6 +15,8 @@ interface TrackerCacheDocument {
   savedAt: number;
   maps: WayfinderMap[];
   trackers: TrackerProfile[];
+  jiraBoards?: JiraBoardOption[];
+  configuredJiraBoardId?: string;
 }
 
 function cachePath(repositoryRoot: string) {
@@ -41,7 +48,10 @@ export async function loadTrackerCache(
 
 export async function saveTrackerCache(
   repositoryRoot: string,
-  data: Pick<CockpitData, "maps" | "trackers">,
+  data: Pick<
+    CockpitData,
+    "maps" | "trackers" | "jiraBoards" | "configuredJiraBoardId"
+  >,
 ) {
   const target = cachePath(repositoryRoot);
   await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
@@ -52,6 +62,8 @@ export async function saveTrackerCache(
     savedAt: Date.now(),
     maps: data.maps,
     trackers: data.trackers,
+    jiraBoards: data.jiraBoards,
+    configuredJiraBoardId: data.configuredJiraBoardId,
   };
   await writeFile(temporary, `${JSON.stringify(document)}\n`, {
     encoding: "utf8",
