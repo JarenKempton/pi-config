@@ -9,11 +9,11 @@ import { fileURLToPath } from "node:url";
 const apply = process.argv.includes("--apply");
 const home = homedir();
 const repoDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const skillDir = resolve(
+const skillDir = resolve(repoDir, "skills/test-in-browser");
+const runner = resolve(
   home,
-  ".pi/agent/git/github.com/JarenKempton/agent-skills/skills/engineering/test-in-browser",
+  ".pi/agent/git/github.com/JarenKempton/agent-skills/skills/engineering/test-in-browser/scripts/browser-cdp.mjs",
 );
-const runner = resolve(skillDir, "scripts/browser-cdp.mjs");
 const mcpConfig = resolve(repoDir, "mcp.json");
 const serverName = "authenticated-browser";
 const mcpUrl = "http://localhost:8931/mcp";
@@ -162,7 +162,7 @@ try {
   ensureNodeVersion();
   if (!existsSync(runner)) {
     throw new Error(
-      "test-in-browser is not installed; run pi install git:git@github.com/JarenKempton/agent-skills",
+      "The optional Playwright broker runner is not installed; use browser_qa or reinstall the agent-skills package before repairing MCP.",
     );
   }
   preview();

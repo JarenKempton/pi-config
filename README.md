@@ -169,6 +169,7 @@ Other commands and tools:
 - `/usage` (or `Alt+U`) opens a refreshable quota overlay with progress bars. It is safe during an active run and never writes to the transcript or model context. Compact quota windows also appear in the footer.
 - `/cost [today|7d|30d|all]` (or `Alt+C`) opens local API-equivalent history in a period-switchable overlay with model totals and proportional cost bars. The footer separately shows current-chat cost, current-session subagent cost, and today's cross-model local tally.
 - `/lg` opens `hunk diff --watch` in macOS Terminal at the exact current worktree.
+- `browser_qa` is the default browser path. It delegates a precise visual task to Codex Computer Use in the user's existing Helium session, automatically handles the allow-listed app-access elicitation, and returns the report plus screenshot evidence. Use the Playwright `authenticated-browser` MCP only when DOM, console, network, or tracing access is specifically required and healthy.
 - `web_search` uses Firecrawl when a local key is available and falls back to DuckDuckGo.
 - `web_fetch` tries bounded direct HTTP first, then Firecrawl for difficult pages.
 

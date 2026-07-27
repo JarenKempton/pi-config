@@ -8,8 +8,9 @@
   "mcpServers": {
     "authenticated-browser": {
       "url": "http://localhost:8931/mcp",
-      "idleTimeout": 20,
-      "requestTimeoutMs": 60000
+      "lifecycle": "lazy-keep-alive",
+      "idleTimeout": 0,
+      "requestTimeoutMs": 30000
     }
   }
 }
