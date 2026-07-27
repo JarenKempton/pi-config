@@ -513,11 +513,19 @@ const makeManager = Effect.gen(function* () {
         ).pipe(
           Effect.ensuring(
             Effect.sync(() => {
-              if (entry.snapshot.status === "running") {
+              if (
+                entry.snapshot.status === "running" ||
+                entry.restarting === true
+              ) {
+                // A backend can accept an idle restart and then die before it
+                // emits RunStarted. Promote the reserved restart to running so
+                // settle records the failure and releases waiters/capacity.
+                entry.snapshot.status = "running";
                 settle(entry, {
                   _tag: "Failed",
                   errorText: "Backend event stream ended unexpectedly",
                 });
+                notify(entry.snapshot.id);
               }
             }),
           ),
@@ -547,9 +555,10 @@ const makeManager = Effect.gen(function* () {
       addInterest(unique);
       const loop = Effect.gen(function* () {
         while (true) {
-          const pending = unique.filter(
-            (id) => entries.get(id)?.snapshot.status === "running",
-          );
+          const pending = unique.filter((id) => {
+            const entry = entries.get(id);
+            return entry?.snapshot.status === "running" || entry?.restarting === true;
+          });
           if (pending.length === 0) return;
           onPending?.(pending);
           yield* nextChange;
@@ -659,6 +668,7 @@ const makeManager = Effect.gen(function* () {
           Effect.onError(() =>
             Effect.sync(() => {
               entry.restarting = false;
+              notify(id);
             }),
           ),
         );

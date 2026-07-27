@@ -1,6 +1,6 @@
 /**
- * Subagents — spawn background subagents on one of three backends
- * (pi, Claude Code, Codex) unified behind a single Effect service interface.
+ * Subagents — spawn background subagents on Pi, Claude Code, Codex, or
+ * read-only Cursor Agent, unified behind a single Effect service interface.
  *
  * Tools (for the parent LLM):
  * - subagent_spawn: fire-and-forget spawn (prompt, title, agent, working_dir,
@@ -15,9 +15,9 @@
  *
  * Architecture: Effect v4 generators throughout (backends -> manager ->
  * runtime); this file is the async boundary where tool handlers run effects
- * against one shared ManagedRuntime. All three backends are real: pi runs
+ * against one shared ManagedRuntime. All four backends are real: pi runs
  * in-process SDK sessions, claude drives the Claude Agent SDK, codex speaks
- * JSON-RPC to a scoped `codex app-server` process.
+ * JSON-RPC to `codex app-server`, and cursor consumes Cursor Agent NDJSON.
  */
 
 import * as fs from "node:fs";
@@ -45,6 +45,10 @@ import {
   type SubagentInfoState,
 } from "../shared/dashboard-state.ts";
 import { deriveBtwTitle, isModelVisible } from "./src/by-the-way.ts";
+import {
+  loadSubagentConfig,
+  resolveSpawnConfig,
+} from "./src/config.ts";
 import {
   BACKEND_NAMES,
   formatElapsed,
@@ -85,7 +89,11 @@ import {
   runTool,
   type SubagentRuntime,
 } from "./src/runtime.ts";
-import { openSubagentPicker, openSubagentTakeover } from "./src/ui/takeover.ts";
+import {
+  openSubagentPicker,
+  openSubagentSettings,
+  openSubagentTakeover,
+} from "./src/ui/takeover.ts";
 
 const SUBAGENT_OUTPUT_MAX_BYTES = 24 * 1024;
 const WAIT_OUTPUT_MAX_BYTES = 48 * 1024;
@@ -281,20 +289,36 @@ export default function (pi: ExtensionAPI) {
       if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
         throw new Error(`Wayfinder agent working directory is invalid: ${cwd}`);
       }
-      assertCwdAllowed(ctx.cwd, cwd, request.profile);
       const manager = await getManager();
+      const configured = resolveSpawnConfig(await loadSubagentConfig(), {
+        harness: request.backend,
+        model:
+          request.model === "inherit" || request.model === "default"
+            ? undefined
+            : request.model,
+        reasoningEffort: request.reasoningEffort,
+        profile: request.profile,
+      });
+      const profile = normalizeProfile(configured.profile);
+      assertCwdAllowed(ctx.cwd, cwd, profile);
+      if (
+        configured.harness === "cursor" &&
+        (profile === "worker" || profile === "unrestricted")
+      ) {
+        throw new Error(
+          "Cursor subagents currently support only scout and researcher profiles; unattended editing remains disabled.",
+        );
+      }
       return runTool(
         getRuntime(),
-        manager.spawn(request.backend, {
+        manager.spawn(configured.harness, {
           origin: "wayfinder",
           prompt: request.prompt,
           title: request.title,
           cwd,
-          model: request.model === "inherit" || request.model === "default"
-            ? undefined
-            : request.model,
-          reasoningEffort: request.reasoningEffort,
-          profile: request.profile,
+          model: configured.model,
+          reasoningEffort: configured.reasoningEffort,
+          profile,
           parent: {
             parentCwd: ctx.cwd,
             projectTrusted: resolveChildProjectTrust({
@@ -357,9 +381,16 @@ export default function (pi: ExtensionAPI) {
       name: Type.String({
         description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.name,
       }),
-      harness: StringEnum(BACKEND_NAMES, {
-        description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.harness,
-      }),
+      harness: Type.Optional(
+        StringEnum(BACKEND_NAMES, {
+          description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.harness,
+        }),
+      ),
+      preset: Type.Optional(
+        Type.String({
+          description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.preset,
+        }),
+      ),
       working_dir: Type.Optional(
         Type.String({
           description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.workingDir,
@@ -383,7 +414,14 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const manager = await getManager();
-      const harness = params.harness;
+      const configured = resolveSpawnConfig(await loadSubagentConfig(), {
+        harness: params.harness,
+        preset: params.preset,
+        model: params.model,
+        reasoningEffort: params.reasoning_effort,
+        profile: params.profile,
+      });
+      const harness = configured.harness;
 
       const cwd = path.resolve(ctx.cwd, params.working_dir ?? ".");
       if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
@@ -391,8 +429,16 @@ export default function (pi: ExtensionAPI) {
       }
 
       const title = params.name.trim().slice(0, 160) || "subagent";
-      const profile = normalizeProfile(params.profile);
+      const profile = normalizeProfile(configured.profile);
       assertCwdAllowed(ctx.cwd, cwd, profile);
+      if (
+        harness === "cursor" &&
+        (profile === "worker" || profile === "unrestricted")
+      ) {
+        throw new Error(
+          "Cursor subagents currently support only scout and researcher profiles; unattended editing remains disabled.",
+        );
+      }
       if (profile === "unrestricted") {
         await confirmUnrestrictedSpawn(ctx, { harness, cwd, title });
       }
@@ -402,8 +448,8 @@ export default function (pi: ExtensionAPI) {
           prompt: params.prompt,
           title,
           cwd,
-          model: params.model,
-          reasoningEffort: params.reasoning_effort,
+          model: configured.model,
+          reasoningEffort: configured.reasoningEffort,
           profile,
           parent: {
             parentCwd: ctx.cwd,
@@ -432,6 +478,8 @@ export default function (pi: ExtensionAPI) {
               harness,
               modelLabel: snap.meta.modelLabel ?? "?",
               cwd,
+              profile,
+              preset: configured.preset,
             }),
           },
         ],
@@ -776,6 +824,9 @@ export default function (pi: ExtensionAPI) {
     const manager = await getManager();
     let snap: SubagentSnapshot;
     try {
+      const configured = resolveSpawnConfig(await loadSubagentConfig(), {
+        harness: "pi",
+      });
       snap = await runTool(
         getRuntime(),
         manager.spawn("pi", {
@@ -783,6 +834,11 @@ export default function (pi: ExtensionAPI) {
           prompt,
           title: deriveBtwTitle(prompt),
           cwd: ctx.cwd,
+          model: configured.model,
+          reasoningEffort: configured.reasoningEffort,
+          // Side questions must remain read-only even when Pi's general
+          // harness default is configured for project editing.
+          profile: "scout",
           parent: {
             parentCwd: ctx.cwd,
             projectTrusted: ctx.isProjectTrusted(),
@@ -834,8 +890,13 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.registerCommand("subagents", {
-    description: "List, inspect, and take over subagents",
+    description: "List, inspect, take over, and configure subagents",
     handler: async (_args, ctx) => openSubagents(ctx),
+  });
+
+  pi.registerCommand("subagent-settings", {
+    description: "Configure subagent harness defaults, models, and presets",
+    handler: async (_args, ctx) => openSubagentSettings(ctx),
   });
 
   pi.registerShortcut("alt+s", {

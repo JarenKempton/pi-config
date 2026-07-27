@@ -6,7 +6,7 @@
   "keywords": ["pi-package"],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test --experimental-strip-types vendor/davis/extensions/subagents/by-the-way.test.ts vendor/davis/extensions/subagents/context-usage.test.ts vendor/davis/extensions/subagents/manager.test.ts vendor/davis/extensions/subagents/permissions.test.ts vendor/davis/extensions/subagents/result-delivery.test.ts vendor/davis/extensions/subagents/takeover.test.ts vendor/davis/extensions/shared/*.test.ts vendor/davis/extensions/workflows/*.test.ts vendor/davis/extensions/git-info/*.test.ts extensions/worktrees/*.test.ts tests/*.test.ts",
+    "test": "node --test --experimental-strip-types vendor/davis/extensions/subagents/by-the-way.test.ts vendor/davis/extensions/subagents/config.test.ts vendor/davis/extensions/subagents/context-usage.test.ts vendor/davis/extensions/subagents/cursor.test.ts vendor/davis/extensions/subagents/manager.test.ts vendor/davis/extensions/subagents/permissions.test.ts vendor/davis/extensions/subagents/result-delivery.test.ts vendor/davis/extensions/subagents/takeover.test.ts vendor/davis/extensions/shared/*.test.ts vendor/davis/extensions/workflows/*.test.ts vendor/davis/extensions/git-info/*.test.ts extensions/worktrees/*.test.ts tests/*.test.ts",
     "test:live": "node --test --experimental-strip-types vendor/davis/extensions/subagents/claude.test.ts vendor/davis/extensions/subagents/codex.test.ts"
   },
   "dependencies": {

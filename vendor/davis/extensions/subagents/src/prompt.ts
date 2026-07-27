@@ -2,16 +2,16 @@
 
 /** Describes subagent_spawn, including harnesses and the fixed concurrency cap. */
 export const SUBAGENT_SPAWN_TOOL_DESCRIPTION =
-  "Spawn a background subagent: a fully autonomous, headless agent with its own context window and a selected safety profile (default scout/read-only). You choose the harness it runs on: pi (in-process pi session), claude (Claude Code), or codex (Codex CLI). Fire-and-forget: this returns immediately with an id. The subagent's final output is queued back to you as a message when it settles, or collect it explicitly with subagent_wait. Children cannot orchestrate more agents/workflows or ask the user, and cannot see this conversation, so the prompt must be self-contained. Non-unrestricted children must stay inside the parent project. Max 4 subagents can be running at once across all harnesses.";
+  "Spawn a background subagent: a fully autonomous, headless agent with its own context window and a selected safety profile (initially scout/read-only, configurable per harness). Choose pi (in-process), claude (Claude Code), codex (Codex CLI), or cursor (Cursor Agent CLI), or use a configured preset/default harness. Fire-and-forget: this returns immediately with an id. The subagent's final output is queued back to you as a message when it settles, or collect it explicitly with subagent_wait. Children cannot orchestrate more agents/workflows or ask the user, and cannot see this conversation, so the prompt must be self-contained. Non-unrestricted children must stay inside the parent project. Cursor is read-only and accepts scout/researcher profiles only. Max 4 subagents can be running at once across all harnesses.";
 
 /** Adds background subagent delegation to the parent model's available-tools prompt. */
 export const SUBAGENT_SPAWN_PROMPT_SNIPPET =
-  "Spawn a background subagent on a chosen harness (pi, Claude Code, or Codex; own context, default scout/read-only profile) for a self-contained task";
+  "Spawn a background subagent on Pi, Claude Code, Codex, or Cursor—or a configured preset—for a self-contained task";
 
 /** Guides the parent model to delegate standalone tasks and avoid unnecessary blocking waits. */
 export const SUBAGENT_SPAWN_PROMPT_GUIDELINES = [
   "Use subagent_spawn to delegate self-contained tasks that can run in the background; give it a complete, standalone prompt.",
-  "Pick the subagent harness deliberately: pi unless you have a reason to prefer Claude Code or Codex (e.g. the user asked for one, or the task suits that harness).",
+  "Pick the subagent harness deliberately: use configured defaults when appropriate, or choose Pi, Claude Code, Codex, or read-only Cursor when the user requests a model/harness or the task suits it.",
   "Use profile=scout or researcher for read-only investigation, profile=worker only for project-confined edits, and profile=unrestricted only when the user explicitly asked for full permissions.",
   "After subagent_spawn, keep working; results arrive automatically. Only call subagent_wait when you cannot proceed without the result.",
 ];
@@ -22,15 +22,17 @@ export const SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS = {
     "Task prompt for the subagent. Must be self-contained: include all needed context, file paths, and what to report back.",
   name: "Short human-readable name for this subagent, shown in listings and the UI",
   harness:
-    'Harness to run the subagent on: "pi" (in-process pi session; inherits this environment), "claude" (Claude Code), or "codex" (Codex CLI). Choose deliberately per task.',
+    'Optional harness: "pi" (in-process), "claude" (Claude Code), "codex" (Codex CLI), or "cursor" (read-only Cursor Agent CLI). Omit to use the preset harness or configured default.',
+  preset:
+    "Optional named preset from subagents.json. Precedence: explicit spawn arguments > preset > harness defaults > backend native default.",
   workingDir:
     "Trusted working directory for the autonomous child (default: current working directory)",
   model:
-    'Model hint, interpreted by the chosen harness (pi: "provider/model-id" or model id; claude: model alias like "sonnet"/"opus"; codex: model slug). Omit for the harness default (pi inherits the current model).',
+    'Model hint interpreted by the harness (pi: provider/model-id; claude: alias; codex/cursor: model slug). Omit for preset/configured/backend defaults.',
   reasoningEffort:
     "Reasoning effort on a shared scale; the harness maps it to its nearest native equivalent (pi thinking level, codex reasoning effort, claude thinking budget). Omit for the harness default (pi inherits the current level).",
   profile:
-    'Safety profile: "scout" (default read-only), "researcher" (read-only research), "worker" (project-confined edits), or "unrestricted" (full permissions; requires explicit UI confirmation and cannot run headlessly).',
+    'Safety profile override: "scout" (read-only), "researcher" (read-only research), "worker" (project-confined edits), or "unrestricted" (full permissions; requires explicit UI confirmation and cannot run headlessly). Omit to use preset/configured defaults; the checked-in initial default is scout.',
 };
 
 /** Builds the subagent_spawn result that tells the parent model how to continue or inspect the child. */
@@ -40,9 +42,11 @@ export function buildSubagentSpawnResult(options: {
   harness: string;
   modelLabel: string;
   cwd: string;
+  profile?: string;
+  preset?: string;
 }) {
   return (
-    `Spawned subagent ${options.id} "${options.title}" (${options.harness}: ${options.modelLabel}, ${options.cwd}).\n` +
+    `Spawned subagent ${options.id} "${options.title}" (${options.harness}/${options.profile ?? "scout"}: ${options.modelLabel}${options.preset ? `, preset ${options.preset}` : ""}, ${options.cwd}).\n` +
     `It runs in the background. Its result will be delivered to you when it finishes, ` +
     `or use subagent_wait(ids: ["${options.id}"]) to block for it, subagent_cancel to stop it, subagent_check to peek, subagent_list to see all.`
   );

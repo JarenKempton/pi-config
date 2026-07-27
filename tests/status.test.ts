@@ -87,6 +87,14 @@ test("usage overlay renders bounded progress bars", () => {
         },
       ],
     },
+    cursor: {
+      id: "cursor",
+      label: "Cursor",
+      source: "Team subscription · Gemini 3.6 Flash Minimal",
+      observedAt: new Date(now - 1_000).toISOString(),
+      stale: false,
+      windows: [],
+    },
   };
   const theme = {
     fg: (_color: string, text: string) => text,
@@ -102,5 +110,8 @@ test("usage overlay renders bounded progress bars", () => {
   assert.equal(lines.every((line) => visibleWidth(line) <= 76), true);
   assert.match(lines.join("\n"), /█/);
   assert.match(lines.join("\n"), /88% used/);
+  assert.match(lines.join("\n"), /Cursor/);
+  assert.match(lines.join("\n"), /Team subscription/);
+  assert.match(lines.join("\n"), /No quota windows reported/);
   assert.match(lines.join("\n"), /esc\/q close/);
 });

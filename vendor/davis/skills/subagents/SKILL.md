@@ -40,6 +40,14 @@ Pi can use any model shown by `pi --list-models`. Prefer `provider/model-id`; a 
 
 Requires Claude Code to be installed and authenticated.
 
+## Cursor Harness
+
+**Harness:** `cursor`
+**Prompt nicknames:** “cursor”, “Cursor Agent”, “cursor subagent”
+**Best use:** read-only model experimentation and independent reviews using the models included in Cursor.
+
+Cursor runs through the installed `cursor-agent` CLI in sandboxed plan mode. Only `scout` and `researcher` profiles are supported; `worker` and `unrestricted` fail closed until unattended editing can be guaranteed safe. Both are technically read-only; the scout prompt prohibits network use while researcher permits necessary web research because Cursor does not expose a per-tool network allowlist. Choose any model shown by `cursor-agent --list-models`, for example `kimi-k3-high`, `gemini-3.6-flash-high`, or `auto`. Cursor model ids commonly encode their native reasoning level, so select the desired model variant rather than relying on `reasoning_effort`.
+
 ## Codex Harness
 
 **Harness:** `codex`
@@ -56,14 +64,27 @@ Requires Claude Code to be installed and authenticated.
 
 Requires the Codex CLI to be installed and authenticated.
 
+## Defaults, Presets, and Settings
+
+Personal defaults and named presets live in `~/.pi/agent/pi-config/subagents.json`. Configure them with `/subagent-settings`, or press `s` from the existing `/subagents` overview. Settings apply only to future spawns.
+
+Spawn option precedence is:
+
+```text
+explicit spawn arguments > named preset > harness defaults > backend native default
+```
+
+Useful checked-in presets include `cursor-kimi`, `cursor-gemini`, and `security-review`. Use `preset` without `harness` to select one, or provide explicit options to override parts of it. Unavailable configured Cursor models are shown as warnings and are never silently substituted.
+
 ## Spawn and Manage
 
-Call `subagent_spawn` with a complete `prompt`, short `name`, chosen `harness`, and optional `working_dir`, `model`, and `reasoning_effort`. At most four subagents run concurrently.
+Call `subagent_spawn` with a complete `prompt`, short `name`, and an optional `harness` or `preset`, plus optional `working_dir`, `model`, and `reasoning_effort`. Omitting both harness and preset uses the configured default harness. At most four subagents run concurrently.
 
 - `subagent_check({ id })`: peek without blocking.
 - `subagent_list()`: list all runs.
 - `subagent_wait({ ids })`: block only when results are required to proceed.
 - `subagent_cancel({ ids })`: stop runs while preserving partial transcripts.
-- `/subagents`: inspect or take over a run interactively.
+- `/subagents`: inspect or take over a run interactively; press `s` for settings.
+- `/subagent-settings`: configure harness defaults, searchable model selectors, safety profiles, and presets.
 
 Results return automatically. After spawning, continue useful parent work instead of immediately waiting.

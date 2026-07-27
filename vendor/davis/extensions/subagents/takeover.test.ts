@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { DEFAULT_SUBAGENT_CONFIG } from "./src/config.ts";
 import {
   reconcileDashboardSelection,
   SUBAGENT_MODAL_OPTIONS,
+  updateSubagentSetting,
   type DashboardSelection,
 } from "./src/ui/takeover.ts";
 
@@ -15,6 +17,20 @@ test("subagent dashboards use a bounded centered modal", () => {
     maxHeight: "88%",
     margin: 1,
   });
+});
+
+test("subagent settings update defaults and presets without mutating the source", () => {
+  const source = structuredClone(DEFAULT_SUBAGENT_CONFIG);
+  const changed = updateSubagentSetting(source, "default:cursor:model", "kimi-k3-max");
+  const preset = updateSubagentSetting(changed, "preset:cursor-kimi:profile", "researcher");
+  assert.equal(source.defaults.cursor.model, "auto");
+  assert.equal(preset.defaults.cursor.model, "kimi-k3-max");
+  assert.equal(preset.presets["cursor-kimi"]?.profile, "researcher");
+  assert.equal(
+    updateSubagentSetting(preset, "default:cursor:profile", "unrestricted")
+      .defaults.cursor.profile,
+    "scout",
+  );
 });
 
 test("dashboard selection follows its subagent id and falls back by row", () => {

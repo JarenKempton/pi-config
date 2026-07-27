@@ -11,9 +11,44 @@ import type {
   KeybindingsManager,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { Component, Focusable, TUI } from "@earendil-works/pi-tui";
-import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { formatElapsed, type SubagentSnapshot } from "../domain.ts";
+import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import type {
+  Component,
+  Focusable,
+  SelectItem,
+  SettingItem,
+  TUI,
+} from "@earendil-works/pi-tui";
+import {
+  Container,
+  Input,
+  SelectList,
+  SettingsList,
+  Text,
+  truncateToWidth,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
+import {
+  DEFAULT_SUBAGENT_CONFIG,
+  loadSubagentConfig,
+  saveSubagentConfig,
+  subagentConfigPath,
+  type SubagentConfig,
+} from "../config.ts";
+import {
+  BACKEND_NAMES,
+  formatElapsed,
+  REASONING_EFFORTS,
+  SUBAGENT_PROFILES,
+  type BackendName,
+  type ReasoningEffort,
+  type SubagentProfile,
+  type SubagentSnapshot,
+} from "../domain.ts";
+import {
+  listCursorModels,
+  type CursorModelOption,
+} from "../backends/cursor.ts";
 import { formatContextUtilization } from "../format.ts";
 import type { SubagentReadModel } from "../manager.ts";
 import { buildTranscriptLines } from "./transcript.ts";
@@ -95,7 +130,7 @@ export async function openSubagentPicker(
       return;
     }
 
-    const picked = await ctx.ui.custom<string | null>(
+    const picked = await ctx.ui.custom<string | "settings" | null>(
       (tui, theme, keybindings, done) =>
         new SubagentDashboard(tui, theme, keybindings, view, selection, done),
       {
@@ -105,11 +140,347 @@ export async function openSubagentPicker(
     );
 
     if (!picked) return;
+    if (picked === "settings") {
+      await openSubagentSettings(ctx);
+      continue;
+    }
     if (!view.get(picked)) continue;
 
     await openSubagentTakeover(ctx, view, picked);
     // After leaving the takeover view, fall back to the dashboard.
   }
+}
+
+// --- Settings -------------------------------------------------------------------
+
+const COMMON_MODELS: Record<BackendName, CursorModelOption[]> = {
+  pi: [
+    { id: "inherit", label: "Inherit parent model" },
+    { id: "openai-codex/gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    { id: "openai-codex/gpt-5.6-terra", label: "GPT-5.6 Terra" },
+    { id: "opencode/claude-fable-5", label: "Claude Fable 5" },
+  ],
+  claude: [
+    { id: "native", label: "Claude Code default" },
+    { id: "fable", label: "Latest Fable" },
+    { id: "sonnet", label: "Latest Sonnet" },
+    { id: "opus", label: "Latest Opus" },
+  ],
+  codex: [
+    { id: "native", label: "Codex default" },
+    { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+    { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+  ],
+  cursor: [{ id: "auto", label: "Cursor Auto" }],
+};
+
+class ConfirmationList implements Component {
+  private readonly list: SelectList;
+
+  constructor(theme: Theme, done: (selectedValue?: string) => void) {
+    this.list = new SelectList(
+      [
+        { value: "cancel", label: "Cancel", description: "Keep current settings" },
+        { value: "reset", label: "Reset all settings", description: "Restore checked-in defaults and presets" },
+      ],
+      2,
+      {
+        selectedPrefix: (text) => theme.fg("accent", text),
+        selectedText: (text) => theme.fg("accent", text),
+        description: (text) => theme.fg("muted", text),
+        scrollInfo: (text) => theme.fg("dim", text),
+        noMatch: (text) => theme.fg("warning", text),
+      },
+    );
+    this.list.onSelect = (item) => done(item.value === "reset" ? "reset" : undefined);
+    this.list.onCancel = () => done(undefined);
+  }
+
+  render(width: number) {
+    return ["Confirm reset", "", ...this.list.render(width), "", "  Enter confirm · Esc back"];
+  }
+
+  handleInput(data: string) {
+    this.list.handleInput(data);
+  }
+
+  invalidate() {
+    this.list.invalidate();
+  }
+}
+
+class SearchableModelList implements Component {
+  private readonly input = new Input();
+  private readonly list: SelectList;
+
+  constructor(
+    models: CursorModelOption[],
+    currentValue: string,
+    theme: Theme,
+    done: (selectedValue?: string) => void,
+  ) {
+    const items: SelectItem[] = models.map((model) => ({
+      value: model.id,
+      label: model.id,
+      description: model.label,
+    }));
+    this.list = new SelectList(items, 12, {
+      selectedPrefix: (text) => theme.fg("accent", text),
+      selectedText: (text) => theme.fg("accent", text),
+      description: (text) => theme.fg("muted", text),
+      scrollInfo: (text) => theme.fg("dim", text),
+      noMatch: (text) => theme.fg("warning", text),
+    });
+    const currentIndex = items.findIndex((item) => item.value === currentValue);
+    if (currentIndex >= 0) this.list.setSelectedIndex(currentIndex);
+    this.list.onSelect = (item) => done(item.value);
+    this.list.onCancel = () => done(undefined);
+  }
+
+  render(width: number) {
+    return [
+      ...this.input.render(width),
+      "",
+      ...this.list.render(width),
+      "",
+      "  Type to filter by model id · ↑↓ select · Enter apply · Esc back",
+    ];
+  }
+
+  handleInput(data: string) {
+    if (/^[\x20-\x7e]$/.test(data) || data === "\x7f" || data === "\b") {
+      this.input.handleInput(data);
+      this.list.setFilter(this.input.getValue());
+      return;
+    }
+    this.list.handleInput(data);
+  }
+
+  invalidate() {
+    this.input.invalidate();
+    this.list.invalidate();
+  }
+}
+
+function uniqueModels(models: CursorModelOption[], current?: string) {
+  const result = [...models];
+  if (current && !result.some((model) => model.id === current)) {
+    result.unshift({ id: current, label: "Configured model (currently unavailable)" });
+  }
+  return result;
+}
+
+function displayModel(backend: BackendName, model: string | undefined) {
+  return model ?? (backend === "pi" ? "inherit" : "native");
+}
+
+function storedModel(value: string) {
+  return value === "inherit" || value === "native" ? undefined : value;
+}
+
+export function updateSubagentSetting(
+  config: SubagentConfig,
+  id: string,
+  value: string,
+): SubagentConfig {
+  const next = structuredClone(config);
+  if (id === "defaultHarness" && BACKEND_NAMES.includes(value as BackendName)) {
+    return { ...next, defaultHarness: value as BackendName };
+  }
+  const [scope, name, field] = id.split(":");
+  if (scope === "default" && BACKEND_NAMES.includes(name as BackendName)) {
+    const backend = name as BackendName;
+    const profile = SUBAGENT_PROFILES.includes(value as SubagentProfile)
+      ? value as SubagentProfile
+      : undefined;
+    const safeProfile =
+      backend !== "cursor" || profile === "scout" || profile === "researcher"
+        ? profile
+        : undefined;
+    const effort = REASONING_EFFORTS.includes(value as ReasoningEffort)
+      ? value as ReasoningEffort
+      : undefined;
+    next.defaults[backend] = {
+      ...next.defaults[backend],
+      ...(field === "model" ? { model: storedModel(value) } : {}),
+      ...(field === "effort" && (value === "inherit" || effort)
+        ? { reasoningEffort: value === "inherit" ? undefined : effort }
+        : {}),
+      ...(field === "profile" && safeProfile ? { profile: safeProfile } : {}),
+    };
+  }
+  if (scope === "preset" && next.presets[name]) {
+    const preset = next.presets[name];
+    const profile = SUBAGENT_PROFILES.includes(value as SubagentProfile)
+      ? value as SubagentProfile
+      : undefined;
+    const safeProfile =
+      preset.harness !== "cursor" || profile === "scout" || profile === "researcher"
+        ? profile
+        : undefined;
+    next.presets[name] = {
+      ...preset,
+      ...(field === "model" ? { model: storedModel(value) } : {}),
+      ...(field === "profile" && safeProfile ? { profile: safeProfile } : {}),
+    };
+  }
+  return next;
+}
+
+function settingItems(
+  config: SubagentConfig,
+  cursorModels: CursorModelOption[],
+  theme: Theme,
+): SettingItem[] {
+  const baseCatalog = (backend: BackendName) =>
+    backend === "cursor" && cursorModels.length > 0
+      ? cursorModels
+      : COMMON_MODELS[backend];
+  const modelCatalog = (backend: BackendName, current?: string) =>
+    uniqueModels(baseCatalog(backend), current);
+  const modelSubmenu = (backend: BackendName) =>
+    (currentValue: string, done: (selectedValue?: string) => void) =>
+      new SearchableModelList(
+        modelCatalog(backend, storedModel(currentValue)),
+        currentValue,
+        theme,
+        done,
+      );
+
+  const items: SettingItem[] = [
+    {
+      id: "defaultHarness",
+      label: "Default harness",
+      currentValue: config.defaultHarness,
+      values: [...BACKEND_NAMES],
+      description: "Used when subagent_spawn omits both harness and preset.",
+    },
+  ];
+  for (const backend of BACKEND_NAMES) {
+    const defaults = config.defaults[backend];
+    const available =
+      defaults.model === "auto" ||
+      baseCatalog(backend).some(
+        (model) => model.id === displayModel(backend, defaults.model),
+      );
+    items.push(
+      {
+        id: `default:${backend}:model`,
+        label: `${backend} model`,
+        currentValue: displayModel(backend, defaults.model),
+        submenu: modelSubmenu(backend),
+        description: available
+          ? `Default model for future ${backend} children.`
+          : "Configured model is not in the current catalog; spawning will report a clear error.",
+      },
+      ...(backend === "cursor"
+        ? []
+        : [{
+            id: `default:${backend}:effort`,
+            label: `${backend} effort`,
+            currentValue: defaults.reasoningEffort ?? "inherit",
+            values: ["inherit", ...REASONING_EFFORTS],
+            description: "Shared reasoning scale; the harness maps it to native settings.",
+          } satisfies SettingItem]),
+      {
+        id: `default:${backend}:profile`,
+        label: `${backend} profile`,
+        currentValue: defaults.profile ?? "scout",
+        values: backend === "cursor"
+          ? ["scout", "researcher"]
+          : [...SUBAGENT_PROFILES],
+        description: backend === "cursor"
+          ? "Cursor is restricted to read-only scout/researcher profiles."
+          : "Default safety profile for future children.",
+      },
+    );
+  }
+  for (const [name, preset] of Object.entries(config.presets)) {
+    items.push(
+      {
+        id: `preset:${name}:model`,
+        label: `Preset ${name}`,
+        currentValue: displayModel(preset.harness, preset.model),
+        submenu: modelSubmenu(preset.harness),
+        description: `${preset.harness} preset model. Explicit spawn options override it.`,
+      },
+      {
+        id: `preset:${name}:profile`,
+        label: `Preset ${name} profile`,
+        currentValue: preset.profile ?? "scout",
+        values: preset.harness === "cursor"
+          ? ["scout", "researcher"]
+          : [...SUBAGENT_PROFILES],
+      },
+    );
+  }
+  items.push({
+    id: "reset",
+    label: "Reset all defaults",
+    currentValue: "requires confirmation",
+    submenu: (_current, done) => new ConfirmationList(theme, done),
+    description: "Restore the checked-in personal defaults and presets.",
+  });
+  return items;
+}
+
+export async function openSubagentSettings(ctx: ExtensionContext) {
+  if (ctx.mode !== "tui") {
+    if (ctx.hasUI) ctx.ui.notify("Subagent settings require TUI mode.", "error");
+    return;
+  }
+  let config = await loadSubagentConfig();
+  const cursorModels = await listCursorModels({ refresh: true }).catch(() => []);
+  await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+    let saveQueue: Promise<void> = Promise.resolve();
+    const persist = () => {
+      const snapshot = structuredClone(config);
+      saveQueue = saveQueue
+        .then(() => saveSubagentConfig(snapshot))
+        .catch((error) => ctx.ui.notify(String(error), "error"));
+      return saveQueue;
+    };
+    const container = new Container();
+    container.addChild(
+      new Text(
+        `${theme.fg("accent", theme.bold("Subagent Settings"))}\n${theme.fg("dim", subagentConfigPath())}`,
+        1,
+        1,
+      ),
+    );
+    const list = new SettingsList(
+      settingItems(config, cursorModels, theme),
+      16,
+      getSettingsListTheme(),
+      (id, value) => {
+        if (id === "reset" && value === "reset") {
+          config = structuredClone(DEFAULT_SUBAGENT_CONFIG);
+          void persist().then(() => {
+            ctx.ui.notify("Subagent settings reset.", "info");
+            done();
+          });
+          return;
+        }
+        config = updateSubagentSetting(config, id, value);
+        void persist();
+      },
+      () => done(),
+      { enableSearch: true },
+    );
+    container.addChild(list);
+    return {
+      render: (width: number) => container.render(width),
+      invalidate: () => container.invalidate(),
+      handleInput: (data: string) => {
+        list.handleInput(data);
+        tui.requestRender();
+      },
+    };
+  }, {
+    overlay: true,
+    overlayOptions: SUBAGENT_MODAL_OPTIONS,
+  });
 }
 
 // --- Dashboard modal ------------------------------------------------------------
@@ -139,7 +510,7 @@ class SubagentDashboard implements Component {
   private keybindings: KeybindingsManager;
   private view: SubagentReadModel;
   private selection: DashboardSelection;
-  private done: (value: string | null) => void;
+  private done: (value: string | "settings" | null) => void;
 
   private closed = false;
   private ticker: ReturnType<typeof setInterval>;
@@ -151,7 +522,7 @@ class SubagentDashboard implements Component {
     keybindings: KeybindingsManager,
     view: SubagentReadModel,
     selection: DashboardSelection,
-    done: (value: string | null) => void,
+    done: (value: string | "settings" | null) => void,
   ) {
     this.tui = tui;
     this.theme = theme;
@@ -176,7 +547,7 @@ class SubagentDashboard implements Component {
     return true;
   }
 
-  private close(result: string | null) {
+  private close(result: string | "settings" | null) {
     if (this.cleanup()) this.done(result);
   }
 
@@ -217,6 +588,10 @@ class SubagentDashboard implements Component {
     if (data === "x") {
       const snap = subs[this.selection.index];
       if (snap && snap.status === "running") this.view.requestAbort(snap.id);
+      return;
+    }
+    if (data === "s") {
+      this.close("settings");
       return;
     }
   }
@@ -295,7 +670,7 @@ class SubagentDashboard implements Component {
       truncateToWidth(
         theme.fg(
           "dim",
-          `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk select · ${configuredKeys(this.keybindings, "tui.select.confirm")} take over · x abort · ${configuredKeys(this.keybindings, "tui.select.cancel")} close`,
+          `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk select · ${configuredKeys(this.keybindings, "tui.select.confirm")} take over · x abort · s settings · ${configuredKeys(this.keybindings, "tui.select.cancel")} close`,
         ),
         width,
       ),

@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("usage", {
     description:
-      "Open live Codex and cached Claude quota windows in a TUI overlay",
+      "Open Codex, Claude, and Cursor account usage status in a TUI overlay",
     handler: async (_args, ctx) => openUsage(ctx),
   });
 

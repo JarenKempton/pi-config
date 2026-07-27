@@ -10,7 +10,7 @@
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { Data } from "effect";
 
-export const BACKEND_NAMES = ["pi", "claude", "codex"] as const;
+export const BACKEND_NAMES = ["pi", "claude", "codex", "cursor"] as const;
 export type BackendName = (typeof BACKEND_NAMES)[number];
 
 /** Who initiated the session. User asides stay out of model-facing tooling. */
@@ -63,7 +63,7 @@ export interface SpawnTask {
   /**
    * Generic model hint, interpreted per backend:
    * pi: "provider/model-id" or bare model id; claude: model alias;
-   * codex: model slug. Omitted = backend default / inherit.
+   * codex/cursor: model slug. Omitted = backend default / inherit.
    */
   readonly model?: string;
   /** Shared effort scale; each backend maps it to its native equivalent. */
@@ -81,7 +81,7 @@ export interface SubagentMeta {
   readonly contextWindow?: number;
   /** pi session file / Claude projects JSONL / Codex rollout path. */
   readonly sessionFilePath?: string;
-  /** Claude session id / Codex conversation id. */
+  /** Claude/Cursor session id / Codex conversation id. */
   readonly nativeSessionId?: string;
 }
 

@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveCursorBinary } from "../../vendor/davis/extensions/subagents/src/backends/cursor.ts";
 
 export const CLAUDE_CACHE_PATH = join(
   homedir(),
@@ -28,7 +29,7 @@ export interface UsageWindow {
 }
 
 export interface UsageProviderStatus {
-  id: "codex" | "claude";
+  id: "codex" | "claude" | "cursor";
   label: string;
   source: string;
   observedAt?: string;
@@ -42,6 +43,7 @@ export interface UsageStatusReport {
   generatedAt: string;
   codex: UsageProviderStatus;
   claude: UsageProviderStatus;
+  cursor: UsageProviderStatus;
 }
 
 export async function readClaudeCache(
@@ -272,12 +274,67 @@ export function parseCodexUsageWindows(value: any): UsageWindow[] {
   return codexBucketWindows(String(limits?.limitId ?? "codex"), limits);
 }
 
+export async function readCursorAccountStatus(
+  timeoutMs = 5_000,
+): Promise<UsageProviderStatus> {
+  const observedAt = new Date().toISOString();
+  try {
+    const data = await new Promise<any>((resolve, reject) => {
+      const binary = resolveCursorBinary();
+      if (!binary) {
+        reject(new Error("cursor-agent executable was not found"));
+        return;
+      }
+      execFile(
+        binary,
+        ["about", "--format", "json"],
+        { encoding: "utf8", timeout: timeoutMs, maxBuffer: 256 * 1024 },
+        (error, stdout, stderr) => {
+          if (error) reject(new Error(String(stderr).trim() || error.message));
+          else {
+            try {
+              resolve(JSON.parse(stdout));
+            } catch (parseError) {
+              reject(parseError);
+            }
+          }
+        },
+      );
+    });
+    const details = [
+      typeof data.subscriptionTier === "string" ? `${data.subscriptionTier} subscription` : undefined,
+      typeof data.model === "string" ? data.model : undefined,
+    ].filter(Boolean).join(" · ");
+    return {
+      id: "cursor",
+      label: "Cursor",
+      source: details || "Cursor CLI account",
+      observedAt,
+      ageMs: 0,
+      stale: false,
+      // Cursor CLI exposes authentication, tier, and active model, but no
+      // deterministic subscription quota windows. Do not invent percentages.
+      windows: [],
+    };
+  } catch (error) {
+    return {
+      id: "cursor",
+      label: "Cursor",
+      source: "Cursor CLI account",
+      stale: true,
+      windows: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function collectUsageStatus(
   now = Date.now(),
 ): Promise<UsageStatusReport> {
-  const [codexResult, claudeCache] = await Promise.all([
+  const [codexResult, claudeCache, cursor] = await Promise.all([
     readCodexRateLimits(),
     readClaudeCache(now),
+    readCursorAccountStatus(),
   ]);
   const codex: UsageProviderStatus = codexResult.ok
     ? {
@@ -311,6 +368,7 @@ export async function collectUsageStatus(
     generatedAt: new Date(now).toISOString(),
     codex,
     claude,
+    cursor,
   };
 }
 
@@ -374,7 +432,11 @@ export async function renderUsageStatus(): Promise<string> {
   lines.push(
     ...report.claude.windows.map((window) => `- ${summarizeWindow(window)}`),
     "",
-    "No private Claude endpoint or credentials are used.",
+    "Cursor CLI account",
+    `- Status: ${report.cursor.error ? `unavailable (${report.cursor.error})` : report.cursor.source}`,
+    "- Cursor CLI does not expose deterministic subscription quota windows.",
+    "",
+    "No private Claude or Cursor endpoint or credentials are used.",
   );
   return lines.join("\n");
 }

@@ -153,7 +153,7 @@ Environment variables are also supported for portable defaults:
 
 ## Orchestration and local reporting
 
-The vendored Davis orchestration package provides background Pi, Claude, and Codex agents, takeover UI, workflows, private run artifacts, and the dashboard. The default profile is read-only:
+The vendored Davis orchestration package provides background Pi, Claude, Codex, and read-only Cursor agents, takeover UI, configurable harness/model presets, workflows, private run artifacts, and the dashboard. The default profile is read-only:
 
 - `scout`: local read/search only
 - `researcher`: read/search plus web tools
@@ -164,9 +164,9 @@ See [`vendor/davis/UPSTREAM.md`](vendor/davis/UPSTREAM.md) and [`vendor/davis/PA
 
 Other commands and tools:
 
-- `/subagents` (or `Alt+S`) opens the background-agent list and takeover view in a bounded modal. It remains available while the parent agent is running.
+- `/subagents` (or `Alt+S`) opens the background-agent list and takeover view in a bounded modal. Press `s` there—or use `/subagent-settings` directly—to configure future harness, model, effort, profile, and preset defaults from `subagents.json`.
 - `/wayfinder` opens the cockpit for Jira or GitHub epics, Wayfinder-labelled issues, or local `map.md`/`wayfinder.md` maps with an adjacent `issues/` ledger. `Alt+W` opens the cockpit; `Alt+A` opens Agent activity. Jira uses the official `acli` client and supports an optional `WAYFINDER_JIRA_MAP_JQL` map-root query. Configuration and run associations live privately under `~/.pi/agent/wayfinder/`; tracker content remains canonical in the configured issue tracker or Markdown files.
-- `/usage` (or `Alt+U`) opens a refreshable quota overlay with progress bars. It is safe during an active run and never writes to the transcript or model context. Compact quota windows also appear in the footer.
+- `/usage` (or `Alt+U`) opens refreshable Codex, Claude, and Cursor account status. Codex/Claude quota windows use progress bars; Cursor shows the authenticated subscription tier and active model because its CLI does not expose deterministic quota percentages. It is safe during an active run and never writes to the transcript or model context.
 - `/cost [today|7d|30d|all]` (or `Alt+C`) opens local API-equivalent history in a period-switchable overlay with model totals and proportional cost bars. The footer separately shows current-chat cost, current-session subagent cost, and today's cross-model local tally.
 - `/lg` opens `hunk diff --watch` in macOS Terminal at the exact current worktree.
 - `browser_qa` is the default browser path. It delegates a precise visual task to Codex Computer Use in the user's existing Helium session, automatically handles the allow-listed app-access elicitation, and returns the report plus screenshot evidence. Use the Playwright `authenticated-browser` MCP only when DOM, console, network, or tracing access is specifically required and healthy.

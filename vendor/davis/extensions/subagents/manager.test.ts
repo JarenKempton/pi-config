@@ -266,10 +266,8 @@ test("send steers an idle subagent into another turn", async () => {
     assert.equal(afterFirst?.status, "done");
 
     await runTool(runtime, manager.send(snap.id, "Second turn"));
-    // The fresh run flips the status back to running...
-    while (manager.view.get(snap.id)?.status !== "running") {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    // waitFor must observe the synchronous restart reservation even before
+    // the asynchronous RunStarted event flips the snapshot back to running.
     await runTool(runtime, manager.waitFor([snap.id]));
     const afterSecond = manager.view.get(snap.id);
     assert.equal(afterSecond?.status, "done");

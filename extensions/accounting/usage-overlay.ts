@@ -164,7 +164,11 @@ export function renderUsageOverlay(
     );
   } else {
     lines.push(row(""));
-    for (const provider of [state.report.codex, state.report.claude]) {
+    for (const provider of [
+      state.report.codex,
+      state.report.claude,
+      state.report.cursor,
+    ]) {
       for (const line of providerLines(theme, provider, innerWidth, now)) {
         lines.push(row(` ${line}`));
       }
