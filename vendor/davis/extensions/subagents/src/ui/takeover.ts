@@ -1,8 +1,8 @@
 /**
  * Takeover UI for subagents (ported from v1, rendering from the synchronous
  * SubagentReadModel instead of live pi sessions):
- * - SubagentDashboard: full popup (overlay) listing all subagents.
- * - TakeoverView: full interactive view of one subagent with an input line
+ * - SubagentDashboard: centered modal listing all subagents.
+ * - TakeoverView: bounded interactive modal for one subagent with an input line
  *   to steer/continue it.
  */
 
@@ -49,6 +49,19 @@ function statusWord(snap: SubagentSnapshot, theme: Theme): string {
 
 // --- Entry points --------------------------------------------------------------
 
+export const SUBAGENT_MODAL_OPTIONS = {
+  anchor: "center",
+  width: 112,
+  minWidth: 58,
+  maxHeight: "88%",
+  margin: 1,
+} as const;
+
+function modalHeight(tui: TUI) {
+  const rows = tui.terminal.rows || 30;
+  return Math.max(12, Math.min(34, Math.floor(rows * 0.84)));
+}
+
 export interface TakeoverOptions {
   readonly badge?: string;
 }
@@ -65,7 +78,7 @@ export async function openSubagentTakeover(
       new TakeoverView(tui, theme, keybindings, id, view, done, options),
     {
       overlay: true,
-      overlayOptions: { anchor: "center", width: "100%", maxHeight: "100%" },
+      overlayOptions: SUBAGENT_MODAL_OPTIONS,
     },
   );
 }
@@ -87,7 +100,7 @@ export async function openSubagentPicker(
         new SubagentDashboard(tui, theme, keybindings, view, selection, done),
       {
         overlay: true,
-        overlayOptions: { anchor: "center", width: "100%", maxHeight: "100%" },
+        overlayOptions: SUBAGENT_MODAL_OPTIONS,
       },
     );
 
@@ -99,7 +112,7 @@ export async function openSubagentPicker(
   }
 }
 
-// --- Dashboard (fullscreen overlay) ----------------------------------------------
+// --- Dashboard modal ------------------------------------------------------------
 
 export interface DashboardSelection {
   id?: string;
@@ -231,11 +244,9 @@ class SubagentDashboard implements Component {
     const subs = this.subs();
     reconcileDashboardSelection(this.selection, subs);
 
-    const rows = this.tui.terminal.rows || 30;
-    // Render exactly terminal rows - 1 so the overlay covers the header,
-    // chat, editor, and extra footer lines while leaving pi's final footer
-    // row visible.
-    const bodyHeight = Math.max(6, rows - 5);
+    // Keep the dashboard bounded like Pi's other centered overlays instead of
+    // replacing the whole terminal. Four rows are reserved for modal chrome.
+    const bodyHeight = Math.max(6, modalHeight(this.tui) - 4);
     const innerWidth = width - 2;
 
     const lines: string[] = [];
@@ -492,10 +503,8 @@ class TakeoverView implements Component, Focusable {
   }
 
   private viewportHeight(): number {
-    const rows = this.tui.terminal.rows || 30;
-    // The complete view renders viewport + 7 chrome rows. Using rows - 8
-    // makes the overlay exactly terminal rows - 1.
-    return Math.max(6, rows - 8);
+    // Header, input, hints, and borders consume seven rows inside the modal.
+    return Math.max(6, modalHeight(this.tui) - 7);
   }
 
   render(width: number): string[] {

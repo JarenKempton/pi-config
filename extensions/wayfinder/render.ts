@@ -898,7 +898,7 @@ function trackerSettings(
   width: number,
 ) {
   const tracker = data.trackers[state.trackerIndex]!;
-  const aligned = tracker.id === "github";
+  const aligned = tracker.id === data.configuredTrackerId;
   const list = [section(theme, "ISSUE TRACKER"), ""];
   data.trackers.forEach((item, index) => {
     const selected = index === state.trackerIndex;

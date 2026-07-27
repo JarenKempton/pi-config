@@ -518,26 +518,28 @@ export async function hydrateGitHubTicket(
   };
 }
 
+export async function isGitHubTrackerConfigured(cwd: string) {
+  const root = await resolveRepositoryRoot(cwd);
+  try {
+    const trackerInstructions = await readFile(
+      path.join(root, "docs/agents/issue-tracker.md"),
+      "utf8",
+    );
+    return /Issue tracker:\s*GitHub/i.test(trackerInstructions);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 export async function loadGitHubWayfinderData(
   cwd: string,
   defaults: CockpitData,
 ): Promise<CockpitData> {
   const root = await resolveRepositoryRoot(cwd);
-  const trackerInstructionsPath = path.join(root, "docs/agents/issue-tracker.md");
-  let trackerInstructions: string;
-  try {
-    trackerInstructions = await readFile(trackerInstructionsPath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(
-        "Wayfinder is not configured for this repository. Add docs/agents/issue-tracker.md and declare `Issue tracker: GitHub` to enable the GitHub adapter.",
-      );
-    }
-    throw error;
-  }
-  if (!/Issue tracker:\s*GitHub/i.test(trackerInstructions)) {
+  if (!(await isGitHubTrackerConfigured(root))) {
     throw new Error(
-      "The installed tracker adapter currently supports repositories configured for GitHub Issues.",
+      "Wayfinder is not configured for this repository. Add docs/agents/issue-tracker.md and declare `Issue tracker: GitHub`, or add a local map.md with an adjacent issues/ directory.",
     );
   }
 

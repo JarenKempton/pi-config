@@ -221,6 +221,37 @@ export function parseThreadTokenUsage(params: unknown) {
   };
 }
 
+function estimateThreadCost(
+  params: unknown,
+  modelLabel: string | undefined,
+  registry: SpawnTask["parent"]["modelRegistry"],
+) {
+  if (!modelLabel || !registry) return undefined;
+  const slash = modelLabel.indexOf("/");
+  const provider = slash >= 0 ? modelLabel.slice(0, slash) : "openai-codex";
+  const modelId = slash >= 0 ? modelLabel.slice(slash + 1) : modelLabel;
+  const model =
+    registry.find(provider, modelId) ??
+    registry.find("openai-codex", modelId) ??
+    registry.find("openai", modelId);
+  if (!model) return undefined;
+
+  const usage = record(record(params)?.tokenUsage);
+  const total = record(usage?.total);
+  const input = numberValue(total?.inputTokens);
+  const cached = numberValue(total?.cachedInputTokens);
+  const output = numberValue(total?.outputTokens);
+  if (input === undefined || cached === undefined || output === undefined) {
+    return undefined;
+  }
+  const uncached = Math.max(0, input - cached);
+  return (
+    uncached * model.cost.input +
+    cached * model.cost.cacheRead +
+    output * model.cost.output
+  ) / 1_000_000;
+}
+
 // --- Item translation --------------------------------------------------------
 
 function fileChangePreview(item: JsonRecord) {
@@ -712,11 +743,22 @@ const makeCodexSession = (
         }
         case "thread/tokenUsage/updated": {
           const { tokens, contextWindow } = parseThreadTokenUsage(params);
+          const costUsd = estimateThreadCost(
+            params,
+            state.meta.modelLabel,
+            task.parent.modelRegistry,
+          );
           if (contextWindow !== undefined) {
             state.meta = { ...state.meta, contextWindow };
             emit({ _tag: "MetaChanged", meta: { contextWindow } });
           }
-          emit({ _tag: "UsageChanged", tokens, contextWindow });
+          emit({
+            _tag: "UsageChanged",
+            tokens,
+            contextWindow,
+            costUsd,
+            costKnown: costUsd !== undefined,
+          });
           break;
         }
         case "error": {

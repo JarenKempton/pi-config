@@ -4,7 +4,7 @@ A persistent Pi TUI for navigating repository epics and Wayfinder maps, inspecti
 
 ## Open
 
-Run Pi inside a configured repository, then use:
+Run Pi inside a configured repository or one containing a local Markdown map, then use:
 
 ```text
 /wayfinder
@@ -44,4 +44,6 @@ Starting a ticket shows the resolved runtime/model/effort/profile and working di
 
 Active sessions use the shared subagent host. Session identifiers and transcript paths are persisted so settled runs remain visible after restarting Pi. Open cockpits poll repository state, and private process heartbeats distinguish agents owned by a live Pi process from interrupted runs. Active sessions can be taken over by their owning Pi process; spectator processes stay read-only rather than creating concurrent session writers. Archived Pi sessions can be opened directly from the slash-command context. Other archived runtimes expose their transcript path and can be continued from the ticket.
 
-The first production adapter is GitHub Issues. A map root is discovered from either the repository's `epic` label or the Wayfinder-specific `wayfinder:map` label; both use native sub-issues, so existing epics do not need relabelling. Root summaries are refreshed in parallel; full comments and dependency edges hydrate only when a ticket opens. The loader also follows explicit migration markers: a GitHub map or ticket that names another source of truth is shown as a read-only `MOVED` mirror, and agent starts or tracker writes are blocked until that provider adapter is installed. Other tracker types remain capability previews until their adapters are installed.
+The production adapters are GitHub Issues and local Markdown. A GitHub map root is discovered from either the repository's `epic` label or the Wayfinder-specific `wayfinder:map` label; both use native sub-issues, so existing epics do not need relabelling. Root summaries are refreshed in parallel; full comments and dependency edges hydrate only when a ticket opens. The loader also follows explicit migration markers: a GitHub map or ticket that names another source of truth is shown as a read-only `MOVED` mirror, and agent starts or tracker writes are blocked until that provider adapter is installed.
+
+When GitHub tracker instructions are absent but the repository contains `map.md` or `wayfinder.md`, Wayfinder automatically uses the Markdown adapter. Each map owns an adjacent `issues/` directory. Issue files support `Type:`, `Status:`, `Blocked by:`, and optional `Mode:` fields plus normal Markdown sections such as `## Question` and `## Answer`. Resolved issue dependencies no longer block downstream frontier work. Markdown remains canonical; opening or running an agent does not silently rewrite the files. Other tracker types remain capability previews until their adapters are installed.

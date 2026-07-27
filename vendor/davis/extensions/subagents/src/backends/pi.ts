@@ -355,10 +355,19 @@ const makePiSession = (
 
     const emitUsage = () => {
       const usage = session.getContextUsage();
+      const costUsd = session.messages.reduce(
+        (total, message) =>
+          messageRole(message) === "assistant"
+            ? total + ((message as AssistantMessage).usage.cost.total ?? 0)
+            : total,
+        0,
+      );
       emit({
         _tag: "UsageChanged",
         tokens: usage?.tokens ?? undefined,
         contextWindow: activeModel()?.contextWindow ?? usage?.contextWindow,
+        costUsd,
+        costKnown: true,
       });
     };
 

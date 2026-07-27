@@ -1,5 +1,7 @@
 export const MODEL_INFO_CHANNEL = "dashboard:model-info";
 export const GIT_INFO_CHANNEL = "dashboard:git-info";
+export const ACCOUNTING_INFO_CHANNEL = "dashboard:accounting-info";
+export const SUBAGENT_INFO_CHANNEL = "dashboard:subagent-info";
 export const REFRESH_CHANNEL = "dashboard:refresh";
 
 export interface ModelInfoState {
@@ -28,6 +30,28 @@ export interface GitInfoState {
   pullRequest: PullRequestInfo | null;
 }
 
+export interface DashboardQuotaWindow {
+  provider: "Codex" | "Claude";
+  id: string;
+  label: string;
+  usedPercent: number;
+  windowDurationMins?: number;
+  stale: boolean;
+}
+
+export interface AccountingInfoState {
+  todayCost: number | null;
+  todayRateKnown: boolean;
+  quotaWindows: DashboardQuotaWindow[];
+  updatedAt: number | null;
+}
+
+export interface SubagentInfoState {
+  count: number;
+  costUsd: number;
+  costKnown: boolean;
+}
+
 export function emptyModelInfoState(): ModelInfoState {
   return {
     provider: "",
@@ -50,6 +74,19 @@ export function emptyGitInfoState(): GitInfoState {
     changedFiles: 0,
     pullRequest: null,
   };
+}
+
+export function emptyAccountingInfoState(): AccountingInfoState {
+  return {
+    todayCost: null,
+    todayRateKnown: true,
+    quotaWindows: [],
+    updatedAt: null,
+  };
+}
+
+export function emptySubagentInfoState(): SubagentInfoState {
+  return { count: 0, costUsd: 0, costKnown: true };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,5 +132,38 @@ export function isGitInfoState(value: unknown): value is GitInfoState {
     (value.branch === null || typeof value.branch === "string") &&
     typeof value.changedFiles === "number" &&
     (value.pullRequest === null || isPullRequestInfo(value.pullRequest))
+  );
+}
+
+function isDashboardQuotaWindow(value: unknown): value is DashboardQuotaWindow {
+  if (!isRecord(value)) return false;
+  return (
+    (value.provider === "Codex" || value.provider === "Claude") &&
+    typeof value.id === "string" &&
+    typeof value.label === "string" &&
+    typeof value.usedPercent === "number" &&
+    (value.windowDurationMins === undefined ||
+      typeof value.windowDurationMins === "number") &&
+    typeof value.stale === "boolean"
+  );
+}
+
+export function isAccountingInfoState(value: unknown): value is AccountingInfoState {
+  if (!isRecord(value)) return false;
+  return (
+    (value.todayCost === null || typeof value.todayCost === "number") &&
+    typeof value.todayRateKnown === "boolean" &&
+    Array.isArray(value.quotaWindows) &&
+    value.quotaWindows.every(isDashboardQuotaWindow) &&
+    (value.updatedAt === null || typeof value.updatedAt === "number")
+  );
+}
+
+export function isSubagentInfoState(value: unknown): value is SubagentInfoState {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.count === "number" &&
+    typeof value.costUsd === "number" &&
+    typeof value.costKnown === "boolean"
   );
 }

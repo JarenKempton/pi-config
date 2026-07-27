@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { buildActivityItems } from "../extensions/wayfinder/activity.ts";
@@ -8,6 +12,7 @@ import {
   isMapRoot,
   parseMarkdownSections,
 } from "../extensions/wayfinder/github-loader.ts";
+import { loadMarkdownWayfinderData } from "../extensions/wayfinder/markdown-loader.ts";
 import { renderCockpit } from "../extensions/wayfinder/render.ts";
 import {
   initialState,
@@ -45,6 +50,37 @@ test("map parsing retains custom sections instead of hard-coding the Wayfinder t
       ["Recorded external blockers", ["Switch"]],
     ],
   );
+});
+
+test("local Markdown maps load their adjacent issue ledger without tracker configuration", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "wayfinder-markdown-"));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    const effort = path.join(root, ".scratch", "effort");
+    await mkdir(path.join(effort, "issues"), { recursive: true });
+    await writeFile(
+      path.join(effort, "map.md"),
+      "# Wayfinder Map — Local effort\n\n## Destination\n\nMake the local map visible.\n\n## Notes\n\n- Keep Markdown canonical.\n",
+    );
+    await writeFile(
+      path.join(effort, "issues", "01-research.md"),
+      "# Research the seam\n\nType: research\nStatus: resolved\nBlocked by: none\n\n## Question\n\nWhere is the seam?\n",
+    );
+    await writeFile(
+      path.join(effort, "issues", "02-decide.md"),
+      "# Decide the adapter\n\nType: grilling\nStatus: open\nBlocked by: 01\n\n## Question\n\nWhich adapter should win?\n",
+    );
+
+    const data = await loadMarkdownWayfinderData(root, structuredClone(defaultData));
+    assert.equal(data.maps.length, 1);
+    assert.equal(data.maps[0]?.source?.provider, "markdown");
+    assert.equal(data.maps[0]?.tickets.length, 2);
+    assert.equal(data.maps[0]?.tickets[1]?.blockedBy.length, 0);
+    assert.equal(data.maps[0]?.tickets[1]?.dependencies?.[0]?.state, "closed");
+    assert.equal(data.trackers[0]?.id, "markdown");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("repository epics and Wayfinder maps are both map roots", () => {

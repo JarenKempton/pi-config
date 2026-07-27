@@ -12,13 +12,20 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import {
+  ACCOUNTING_INFO_CHANNEL,
+  emptyAccountingInfoState,
   emptyGitInfoState,
   emptyModelInfoState,
+  emptySubagentInfoState,
   GIT_INFO_CHANNEL,
   MODEL_INFO_CHANNEL,
   REFRESH_CHANNEL,
+  SUBAGENT_INFO_CHANNEL,
+  isAccountingInfoState,
   isGitInfoState,
   isModelInfoState,
+  isSubagentInfoState,
+  type DashboardQuotaWindow,
 } from "../shared/dashboard-state.ts";
 
 type Rgb = [number, number, number];
@@ -110,6 +117,35 @@ function formatDirectory(cwd: string) {
   return sanitizeTerminalLabel(display);
 }
 
+function formatMoney(value: number) {
+  return `$${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : value >= 1 ? 2 : 4)}`;
+}
+
+function quotaPeriod(window: DashboardQuotaWindow) {
+  if (window.windowDurationMins === 300 || window.id === "five-hour") return "5h";
+  if (window.windowDurationMins === 10_080 || window.id === "seven-day") return "week";
+  if (window.windowDurationMins && window.windowDurationMins % 1_440 === 0) {
+    return `${window.windowDurationMins / 1_440}d`;
+  }
+  return window.label.replace(/\s+window$/i, "");
+}
+
+function formatQuotaWindows(windows: DashboardQuotaWindow[]) {
+  return windows
+    .slice()
+    .sort((left, right) => {
+      const rank = (window: DashboardQuotaWindow) =>
+        window.id === "five-hour" ? 0 : window.id === "seven-day" ? 1 : 2;
+      return rank(left) - rank(right);
+    })
+    .slice(0, 4)
+    .map(
+      (window) =>
+        `${window.provider} ${quotaPeriod(window)} ${Math.round(window.usedPercent)}%${window.stale ? "~" : ""}`,
+    )
+    .join(" · ");
+}
+
 function center(text: string, width: number) {
   const padding = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
   return truncateToWidth(`${" ".repeat(padding)}${text}`, width);
@@ -139,6 +175,8 @@ export default function uiCustomization(pi: ExtensionAPI) {
   let title = "pi";
   let modelInfo = emptyModelInfoState();
   let gitInfo = emptyGitInfoState();
+  let accountingInfo = emptyAccountingInfoState();
+  let subagentInfo = emptySubagentInfoState();
   let requestRender: (() => void) | undefined;
   let activeTui: DashboardTui | undefined;
 
@@ -151,6 +189,18 @@ export default function uiCustomization(pi: ExtensionAPI) {
   const stopGitListener = pi.events.on(GIT_INFO_CHANNEL, (value) => {
     if (!isGitInfoState(value)) return;
     gitInfo = value;
+    requestRender?.();
+  });
+
+  const stopAccountingListener = pi.events.on(ACCOUNTING_INFO_CHANNEL, (value) => {
+    if (!isAccountingInfoState(value)) return;
+    accountingInfo = value;
+    requestRender?.();
+  });
+
+  const stopSubagentListener = pi.events.on(SUBAGENT_INFO_CHANNEL, (value) => {
+    if (!isSubagentInfoState(value)) return;
+    subagentInfo = value;
     requestRender?.();
   });
 
@@ -208,7 +258,16 @@ export default function uiCustomization(pi: ExtensionAPI) {
             modelInfo.tokensPerSecond === null
               ? "— tok/s"
               : `${Math.round(modelInfo.tokensPerSecond)} tok/s`;
-          const usage = `${contextPercent}%/${contextWindow} · $${modelInfo.cost.toFixed(2)} · ${tps}`;
+          const subagents =
+            subagentInfo.count === 0
+              ? ""
+              : ` · subagents ${subagentInfo.costKnown ? "" : "≥"}${formatMoney(subagentInfo.costUsd)}`;
+          const today =
+            accountingInfo.todayCost === null
+              ? ""
+              : ` · today ${accountingInfo.todayRateKnown ? "" : "≥"}${formatMoney(accountingInfo.todayCost)}`;
+          const usage = `${contextPercent}%/${contextWindow} · chat ${formatMoney(modelInfo.cost)}${subagents}${today} · ${tps}`;
+          const quotas = formatQuotaWindows(accountingInfo.quotaWindows);
           const model = modelInfo.provider
             ? `${modelInfo.provider}/${modelInfo.modelId} · ${modelInfo.thinking}`
             : modelInfo.modelId;
@@ -217,8 +276,9 @@ export default function uiCustomization(pi: ExtensionAPI) {
             columns(directory, theme.fg("muted", model), width),
             columns(theme.fg("muted", usage), theme.fg("muted", git), width),
           ];
+          if (quotas) lines.push(theme.fg("dim", truncateToWidth(quotas, width)));
 
-          // Extension statuses render after the two dashboard lines, one per row.
+          // Extension statuses render after the dashboard lines, one per row.
           const statuses = footerData.getExtensionStatuses();
           const statusLines = Array.from(statuses.entries())
             .sort(([a], [b]) => a.localeCompare(b))
@@ -242,12 +302,16 @@ export default function uiCustomization(pi: ExtensionAPI) {
     title = formatDirectory(ctx.cwd);
     modelInfo = emptyModelInfoState();
     gitInfo = emptyGitInfoState();
+    accountingInfo = emptyAccountingInfoState();
+    subagentInfo = emptySubagentInfoState();
     install(ctx);
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
     stopModelListener();
     stopGitListener();
+    stopAccountingListener();
+    stopSubagentListener();
     activeTui = undefined;
     requestRender = undefined;
     if (ctx.mode === "tui") {

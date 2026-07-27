@@ -303,6 +303,7 @@ async function parsePi(
   for (const root of paths) {
     for await (const file of walk(root)) {
       const fallback = statSync(file).mtimeMs;
+      if (since !== null && fallback < since) continue;
       const lines = (await readFile(file, "utf8")).split(/\r?\n/);
       for (let index = 0; index < lines.length; index++) {
         if (!lines[index]?.trim()) continue;
@@ -351,6 +352,7 @@ async function parseCodex(
   for (const root of paths) {
     for await (const file of walk(root)) {
       const fallback = statSync(file).mtimeMs;
+      if (since !== null && fallback < since) continue;
       let currentModel = "unknown";
       let previousUsageFingerprint: string | undefined;
       const lines = (await readFile(file, "utf8")).split(/\r?\n/);
@@ -413,6 +415,7 @@ async function parseClaude(
   for (const root of paths) {
     for await (const file of walk(root)) {
       const fallback = statSync(file).mtimeMs;
+      if (since !== null && fallback < since) continue;
       const lines = (await readFile(file, "utf8")).split(/\r?\n/);
       for (let index = 0; index < lines.length; index++) {
         if (!lines[index]?.trim()) continue;

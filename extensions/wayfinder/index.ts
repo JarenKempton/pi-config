@@ -19,9 +19,14 @@ import { startRepositoryHeartbeat } from "./heartbeat.ts";
 import {
   claimGitHubTicket,
   hydrateGitHubTicket,
+  isGitHubTrackerConfigured,
   loadGitHubWayfinderData,
   resolveRepositoryRoot,
 } from "./github-loader.ts";
+import {
+  discoverMarkdownMapFiles,
+  loadMarkdownWayfinderData,
+} from "./markdown-loader.ts";
 import { loadAgentCatalog } from "./model-catalog.ts";
 import { renderCockpit } from "./render.ts";
 import { constrainAgentTarget, resolveAgentTarget } from "./routing.ts";
@@ -302,7 +307,7 @@ export class WayfinderCockpitComponent {
 
     if (screen === "tracker-settings") {
       const tracker = this.data.trackers[trackerIndex];
-      if (tracker?.id !== "github") {
+      if (tracker?.id !== "github" && tracker?.id !== "markdown") {
         this.ctx.ui.notify(
           `${tracker?.label ?? "This tracker"} is visualized but its production adapter is not installed yet.`,
           "warning",
@@ -473,7 +478,9 @@ export class WayfinderCockpitComponent {
         `${target.runtime} · ${target.model} · ${target.effort} · ${target.profile}`,
         `Working directory: ${workingDirectory}`,
         ticket.trackerState === "open"
-          ? "This will claim the GitHub ticket before the agent starts."
+          ? ticket.source?.provider === "github"
+            ? "This will claim the GitHub ticket before the agent starts."
+            : "The local Markdown remains canonical and will not be rewritten."
           : "The ticket is already claimed or resolved.",
       ].join("\n"),
     );
@@ -481,7 +488,9 @@ export class WayfinderCockpitComponent {
 
     try {
       if (ticket.trackerState === "open") {
-        await claimGitHubTicket(this.workspaceRoot, ticket.id);
+        if (ticket.source?.provider === "github") {
+          await claimGitHubTicket(this.workspaceRoot, ticket.id);
+        }
         ticket.trackerState = "claimed";
       }
       const snapshot = await this.host.spawn(this.ctx, {
@@ -749,6 +758,7 @@ export async function showWayfinderCockpit(
     let settings: WorkspaceSettings;
     let workspaceKey: string;
     let persisted: boolean;
+    let activeTrackerId: WorkspaceSettings["trackerId"];
     let data: CockpitData;
     try {
       repositoryRoot = await resolveRepositoryRoot(ctx.cwd);
@@ -760,6 +770,15 @@ export async function showWayfinderCockpit(
       workspaceKey = loadedSettings.key;
       repositoryRoot = workspaceKey;
       persisted = loadedSettings.persisted;
+      activeTrackerId = settings.trackerId;
+      if (
+        activeTrackerId === "github" &&
+        !(await isGitHubTrackerConfigured(repositoryRoot)) &&
+        (await discoverMarkdownMapFiles(repositoryRoot)).length > 0
+      ) {
+        activeTrackerId = "markdown";
+      }
+      settings = { ...settings, trackerId: activeTrackerId };
       const [cached, runs] = await Promise.all([
         loadTrackerCache(workspaceKey),
         loadRuns(workspaceKey),
@@ -775,7 +794,7 @@ export async function showWayfinderCockpit(
           AFK: { ...settings.agentDefaults.AFK },
         },
         configuredDeliveryProfileId: settings.deliveryProfileId || undefined,
-        configuredTrackerId: settings.trackerId,
+        configuredTrackerId: activeTrackerId,
         settingsPath: settingsPath(),
         settingsPersisted: persisted,
         runs,
@@ -793,8 +812,17 @@ export async function showWayfinderCockpit(
 
     const host = getSubagentHost();
     const refreshData = async () => {
+      const trackerLoader =
+        activeTrackerId === "markdown"
+          ? loadMarkdownWayfinderData
+          : activeTrackerId === "github"
+            ? loadGitHubWayfinderData
+            : undefined;
+      if (!trackerLoader) {
+        throw new Error(`The ${activeTrackerId} Wayfinder adapter is not installed.`);
+      }
       const [trackerData, agentCatalog] = await Promise.all([
-        loadGitHubWayfinderData(repositoryRoot, defaultData),
+        trackerLoader(repositoryRoot, defaultData),
         loadAgentCatalog(ctx),
       ]);
       void saveTrackerCache(repositoryRoot, trackerData).catch((error) => {

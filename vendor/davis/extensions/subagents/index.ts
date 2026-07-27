@@ -11,7 +11,7 @@
  * - subagent_list: list all subagents.
  *
  * Unawaited subagents queue their result as a follow-up message when they
- * settle. `/subagents` opens a picker + full interactive takeover view.
+ * settle. `/subagents` or Alt+S opens a modal picker + interactive takeover view.
  *
  * Architecture: Effect v4 generators throughout (backends -> manager ->
  * runtime); this file is the async boundary where tool handlers run effects
@@ -40,6 +40,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import {
+  SUBAGENT_INFO_CHANNEL,
+  type SubagentInfoState,
+} from "../shared/dashboard-state.ts";
 import { deriveBtwTitle, isModelVisible } from "./src/by-the-way.ts";
 import {
   BACKEND_NAMES,
@@ -169,8 +173,14 @@ export default function (pi: ExtensionAPI) {
   };
 
   const updateStatus = (manager: SubagentManagerShape) => {
-    if (!ui) return;
     const subs = manager.view.list();
+    const costState = {
+      count: subs.length,
+      costUsd: subs.reduce((total, snap) => total + (snap.usage.costUsd ?? 0), 0),
+      costKnown: subs.every((snap) => snap.usage.costKnown),
+    } satisfies SubagentInfoState;
+    pi.events.emit(SUBAGENT_INFO_CHANNEL, costState);
+    if (!ui) return;
     if (subs.length === 0) {
       ui.setStatus("subagents", undefined);
       return;
@@ -318,6 +328,11 @@ export default function (pi: ExtensionAPI) {
     unsubStatus?.();
     unsubStatus = undefined;
     ui?.setStatus("subagents", undefined);
+    pi.events.emit(SUBAGENT_INFO_CHANNEL, {
+      count: 0,
+      costUsd: 0,
+      costKnown: true,
+    } satisfies SubagentInfoState);
     ui = undefined;
     const closing = runtime;
     runtime = undefined;
@@ -798,26 +813,33 @@ export default function (pi: ExtensionAPI) {
     handler: runByTheWay,
   });
 
+  const openSubagents = async (ctx: ExtensionContext) => {
+    if (ctx.mode !== "tui") {
+      if (ctx.hasUI)
+        ctx.ui.notify(
+          "Subagent takeover is only available in the TUI",
+          "error",
+        );
+      return;
+    }
+    const manager = await getManager();
+    if (manager.view.size() === 0) {
+      ctx.ui.notify(
+        "No subagents yet. The agent spawns them with subagent_spawn.",
+        "info",
+      );
+      return;
+    }
+    await openSubagentPicker(ctx, manager.view);
+  };
+
   pi.registerCommand("subagents", {
     description: "List, inspect, and take over subagents",
-    handler: async (_args, ctx) => {
-      if (ctx.mode !== "tui") {
-        if (ctx.hasUI)
-          ctx.ui.notify(
-            "Subagent takeover is only available in the TUI",
-            "error",
-          );
-        return;
-      }
-      const manager = await getManager();
-      if (manager.view.size() === 0) {
-        ctx.ui.notify(
-          "No subagents yet. The agent spawns them with subagent_spawn.",
-          "info",
-        );
-        return;
-      }
-      await openSubagentPicker(ctx, manager.view);
-    },
+    handler: async (_args, ctx) => openSubagents(ctx),
+  });
+
+  pi.registerShortcut("alt+s", {
+    description: "Open subagents",
+    handler: openSubagents,
   });
 }

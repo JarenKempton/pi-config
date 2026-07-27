@@ -2,8 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   reconcileDashboardSelection,
+  SUBAGENT_MODAL_OPTIONS,
   type DashboardSelection,
 } from "./src/ui/takeover.ts";
+
+
+test("subagent dashboards use a bounded centered modal", () => {
+  assert.deepEqual(SUBAGENT_MODAL_OPTIONS, {
+    anchor: "center",
+    width: 112,
+    minWidth: 58,
+    maxHeight: "88%",
+    margin: 1,
+  });
+});
 
 test("dashboard selection follows its subagent id and falls back by row", () => {
   const selection: DashboardSelection = { id: "sa-7", index: 6 };
