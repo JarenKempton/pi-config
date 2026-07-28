@@ -72,6 +72,7 @@ export interface Ticket {
   /** Canonical tracker hierarchy metadata. */
   parentId?: string;
   hierarchyLevel?: number;
+  hasChildren?: boolean;
   updatedAt?: string;
   assignee?: string;
   blockedBy: string[];

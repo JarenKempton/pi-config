@@ -24,6 +24,7 @@ ${ticket.id} ${ticket.title}
 Canonical tracker: ${ticket.source?.provider ?? "unknown"}
 Tracker status: ${ticket.trackerStatus ?? ticket.trackerState}
 Parent: ${ticket.parentId ?? "map root"}
+Hierarchy role: ${ticket.hasChildren ? "execution parent" : "claimable leaf"}
 Type: ${ticket.type}
 Mode: ${ticket.mode}
 Open blockers: ${ticket.blockedBy.join(", ") || "none"}

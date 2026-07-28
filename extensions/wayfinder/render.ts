@@ -91,6 +91,7 @@ function ticketMeta(ticket: Ticket, theme: Theme) {
   const pieces: string[] = [ticket.type, ticket.mode];
   if (ticket.trackerStatus) pieces.push(ticket.trackerStatus);
   if (ticket.parentId) pieces.push(`under ${ticket.parentId}`);
+  if (ticket.hasChildren) pieces.push("parent lane");
   if (ticket.agent) pieces.push(`${ticket.agent.runtime} ${ticket.agent.state}`);
   if (ticket.workspace) pieces.push("worktree");
   if (ticket.review) pieces.push(`PR #${ticket.review.number}`);

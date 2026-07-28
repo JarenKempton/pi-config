@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { loadWorkspaceSettings } from "./config.ts";
 import { findTrackerMigration } from "./github-loader.ts";
-import { mapFromJira, type JiraWorkItem } from "./jira-loader.ts";
+import { mapFromJira, transitionJiraTicket, type JiraWorkItem } from "./jira-loader.ts";
 import { presentationState } from "./state.ts";
 
 function issue(
@@ -87,11 +87,29 @@ test("Jira maps include parent tickets and subtasks with native statuses", () =>
   assert.equal(todoTicket.url, "https://responsibid.atlassian.net/browse/JWB-109");
 
   const parentTicket = map.tickets.find((ticket) => ticket.id === "JWB-5")!;
+  assert.equal(parentTicket.hasChildren, true);
+  assert.equal(todoTicket.hasChildren, false);
   assert.equal(presentationState(parentTicket), "in-flight");
 
   const blockedTicket = map.tickets.find((ticket) => ticket.id === "JWB-108")!;
   assert.equal(presentationState(blockedTicket), "blocked");
   assert.deepEqual(blockedTicket.blockedBy, ["JWB-999"]);
+});
+
+test("Jira leaf claims use an explicit In Progress transition", async () => {
+  const calls: string[][] = [];
+  await transitionJiraTicket(process.cwd(), "JWB-146", "In Progress", async (args) => {
+    calls.push(args);
+    return "{}";
+  });
+  assert.deepEqual(calls, [[
+    "jira", "workitem", "transition", "--key", "JWB-146",
+    "--status", "In Progress", "--yes", "--json",
+  ]]);
+  await assert.rejects(
+    transitionJiraTicket(process.cwd(), "not-a-key", "To Do", async () => "{}"),
+    /Invalid Jira ticket id/,
+  );
 });
 
 test("a repository Jira declaration becomes the default tracker", async () => {

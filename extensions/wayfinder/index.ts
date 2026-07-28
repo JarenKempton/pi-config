@@ -23,7 +23,11 @@ import {
   loadGitHubWayfinderData,
   resolveRepositoryRoot,
 } from "./github-loader.ts";
-import { loadJiraBoards, loadJiraWayfinderData } from "./jira-loader.ts";
+import {
+  loadJiraBoards,
+  loadJiraWayfinderData,
+  transitionJiraTicket,
+} from "./jira-loader.ts";
 import {
   discoverMarkdownMapFiles,
   loadMarkdownWayfinderData,
@@ -496,6 +500,20 @@ export class WayfinderCockpitComponent {
       this.ctx.ui.notify(`${ticket.id} is already resolved.`, "info");
       return;
     }
+    if (ticket.hasChildren) {
+      this.ctx.ui.notify(
+        `${ticket.id} is an execution parent. Select one of its leaf subtasks to start work.`,
+        "info",
+      );
+      return;
+    }
+    if (/blocked|impediment|waiting/i.test(ticket.trackerStatus ?? "")) {
+      this.ctx.ui.notify(
+        `${ticket.id} is ${ticket.trackerStatus}; clear its Jira blocker before starting work.`,
+        "warning",
+      );
+      return;
+    }
     if (ticket.blockedBy.length > 0) {
       this.ctx.ui.notify(
         `${ticket.id} is blocked by ${ticket.blockedBy.join(", ")}.`,
@@ -525,16 +543,25 @@ export class WayfinderCockpitComponent {
         ticket.trackerState === "open"
           ? ticket.source?.provider === "github"
             ? "This will claim the GitHub ticket before the agent starts."
-            : "The canonical tracker remains unchanged; only the local agent association is recorded."
-          : "The ticket is already claimed or resolved.",
+            : ticket.source?.provider === "jira"
+              ? "After confirmation, Jira will move this leaf ticket to In Progress before the agent starts."
+              : "The canonical tracker remains unchanged; only the local agent association is recorded."
+          : "The ticket is already active or resolved.",
       ].join("\n"),
     );
     if (!confirmed) return;
 
+    let jiraTransitioned = false;
+    let agentStarted = false;
     try {
       if (ticket.trackerState === "open") {
         if (ticket.source?.provider === "github") {
           await claimGitHubTicket(this.workspaceRoot, ticket.id);
+        } else if (ticket.source?.provider === "jira") {
+          await transitionJiraTicket(this.workspaceRoot, ticket.id, "In Progress");
+          jiraTransitioned = true;
+          ticket.trackerStatus = "In Progress";
+          ticket.trackerStatusCategory = "In Progress";
         }
         ticket.trackerState = "claimed";
       }
@@ -547,6 +574,7 @@ export class WayfinderCockpitComponent {
         reasoningEffort: target.effort,
         profile: target.profile,
       });
+      agentStarted = true;
       const run = await recordRun(map.id, ticket.id, snapshot);
       this.data.runs = [
         run,
@@ -569,6 +597,19 @@ export class WayfinderCockpitComponent {
         );
       }
     } catch (error) {
+      if (jiraTransitioned && !agentStarted) {
+        try {
+          await transitionJiraTicket(this.workspaceRoot, ticket.id, "To Do");
+          ticket.trackerState = "open";
+          ticket.trackerStatus = "To Do";
+          ticket.trackerStatusCategory = "To Do";
+        } catch {
+          this.ctx.ui.notify(
+            `${ticket.id} may still be In Progress in Jira; refresh and reconcile it manually.`,
+            "warning",
+          );
+        }
+      }
       this.ctx.ui.notify(
         `Unable to start agent: ${error instanceof Error ? error.message : String(error)}`,
         "error",

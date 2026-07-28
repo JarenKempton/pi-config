@@ -309,6 +309,8 @@ export function mapFromJira(
   const tickets = normalizedChildren.map(({ issue, depth }) =>
     ticketFromJira(issue, origin, depth ?? 1),
   );
+  const parentKeys = new Set(tickets.flatMap((ticket) => ticket.parentId ? [ticket.parentId] : []));
+  for (const ticket of tickets) ticket.hasChildren = parentKeys.has(ticket.id);
   const url = browseUrl(root, origin);
   return {
     id: `jira:${root.key}`,
@@ -434,6 +436,31 @@ async function search(jql: string, cwd: string, runner: AcliRunner) {
     cwd,
   );
   return jiraWorkItems(parseJson(output));
+}
+
+export async function transitionJiraTicket(
+  cwd: string,
+  ticketId: string,
+  status: "To Do" | "In Progress",
+  runner: AcliRunner = runAcli,
+) {
+  if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(ticketId)) {
+    throw new Error(`Invalid Jira ticket id: ${ticketId}`);
+  }
+  await runner(
+    [
+      "jira",
+      "workitem",
+      "transition",
+      "--key",
+      ticketId,
+      "--status",
+      status,
+      "--yes",
+      "--json",
+    ],
+    cwd,
+  );
 }
 
 async function view(key: string, cwd: string, runner: AcliRunner) {
