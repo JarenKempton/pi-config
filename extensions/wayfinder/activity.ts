@@ -59,7 +59,20 @@ function ticketCategory(map: WayfinderMap, ticket: Ticket): ActivityCategory {
   ) {
     return "needs-input";
   }
-  if (ticket.blockedBy.length > 0) return "waiting";
+  const nativeStatus = ticket.trackerStatus?.toLowerCase() ?? "";
+  if (
+    ticket.blockedBy.length > 0 ||
+    /blocked|impediment|waiting/.test(nativeStatus)
+  ) return "waiting";
+  if (ticket.source?.provider === "jira") {
+    const category = ticket.trackerStatusCategory?.toLowerCase() ?? "";
+    if (
+      ticket.trackerState === "claimed" ||
+      category.includes("progress") ||
+      category === "indeterminate"
+    ) return "needs-input";
+    return "ready";
+  }
   if (ticket.trackerState === "claimed") return "needs-input";
   return "ready";
 }

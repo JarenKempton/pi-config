@@ -100,6 +100,20 @@ export async function workspaceKey(cwd: string) {
   return realpath(cwd);
 }
 
+async function repositoryTracker(cwd: string) {
+  try {
+    const instructions = await readFile(
+      path.join(cwd, "docs", "agents", "issue-tracker.md"),
+      "utf8",
+    );
+    const declared = instructions.match(/^Issue tracker:\s*(Jira|GitHub|Markdown)\s*$/im)?.[1];
+    return declared?.toLowerCase();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 export async function loadWorkspaceSettings(
   cwd: string,
   routes: RoutingRule[],
@@ -107,11 +121,16 @@ export async function loadWorkspaceSettings(
   const key = await workspaceKey(cwd);
   const document = await readDocument();
   const stored = document.workspaces[key];
+  const defaults = defaultWorkspaceSettings(routes);
+  const declaredTracker = await repositoryTracker(key);
   return {
     key,
     settings: stored
       ? { ...stored, jiraBoardId: stored.jiraBoardId ?? "6" }
-      : defaultWorkspaceSettings(routes),
+      : {
+          ...defaults,
+          trackerId: declaredTracker ?? defaults.trackerId,
+        },
     persisted: Boolean(stored),
   };
 }

@@ -66,6 +66,13 @@ export interface Ticket {
   domains: string[];
   capabilities: string[];
   trackerState: TrackerState;
+  /** Provider-native workflow status, for example Jira's To Do or Blocked. */
+  trackerStatus?: string;
+  trackerStatusCategory?: string;
+  /** Canonical tracker hierarchy metadata. */
+  parentId?: string;
+  hierarchyLevel?: number;
+  updatedAt?: string;
   assignee?: string;
   blockedBy: string[];
   agent?: {

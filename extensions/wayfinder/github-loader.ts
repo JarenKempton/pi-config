@@ -172,6 +172,24 @@ export function findTrackerMigration(
   kind: "map" | "ticket",
 ): TrackerReference | undefined {
   const text = values.join("\n");
+
+  if (/jira is now the source of truth|moved to jira|canonical (?:execution )?tracker:\s*jira/i.test(text)) {
+    const jiraPattern =
+      kind === "ticket"
+        ? /https:\/\/[^\s)]+\.atlassian\.net\/browse\/([A-Z]+-\d+)/gi
+        : /https:\/\/[^\s)]+\.atlassian\.net\/(?:jira\/[^\s)]*\/boards\/\d+|browse\/([A-Z]+-\d+))/gi;
+    const match = [...text.matchAll(jiraPattern)].at(-1);
+    if (match?.[0]) {
+      const url = match[0].replace(/[.,;:]+$/, "");
+      return {
+        provider: "jira",
+        id: match[1] ?? (url.match(/boards\/(\d+)/)?.[1] ? `board:${url.match(/boards\/(\d+)/)![1]}` : url),
+        url,
+        canonical: true,
+      };
+    }
+  }
+
   if (!/linear is now the source of truth|moved to linear/i.test(text)) return undefined;
   const pattern =
     kind === "map"

@@ -70,6 +70,11 @@ export function presentationState(ticket: Ticket) {
   if (ticket.trackerState === "migrated") return "attention" as const;
   if (ticket.trackerState === "resolved") return "resolved" as const;
   if (ticket.attention) return "attention" as const;
+  const nativeStatus = ticket.trackerStatus?.toLowerCase() ?? "";
+  // Jira status is authoritative. An assignee is ownership, not proof that a
+  // To Do item is in flight, and a native Blocked status must remain visible
+  // even when a link is temporarily missing.
+  if (/blocked|impediment|waiting/.test(nativeStatus)) return "blocked" as const;
   if (ticket.blockedBy.length > 0) return "blocked" as const;
   if (
     ticket.review?.state === "review-required" ||
@@ -77,6 +82,19 @@ export function presentationState(ticket: Ticket) {
     ticket.review?.state === "approved"
   ) {
     return "waiting" as const;
+  }
+  if (ticket.source?.provider === "jira") {
+    const category = ticket.trackerStatusCategory?.toLowerCase() ?? "";
+    if (
+      ticket.trackerState === "claimed" ||
+      category.includes("progress") ||
+      category === "indeterminate" ||
+      /in progress|review|testing|implementing|active/.test(nativeStatus) ||
+      ticket.agent
+    ) {
+      return "in-flight" as const;
+    }
+    return "frontier" as const;
   }
   if (
     ticket.trackerState === "claimed" ||

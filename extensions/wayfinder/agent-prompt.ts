@@ -21,6 +21,9 @@ ${mapContext}
 
 TICKET
 ${ticket.id} ${ticket.title}
+Canonical tracker: ${ticket.source?.provider ?? "unknown"}
+Tracker status: ${ticket.trackerStatus ?? ticket.trackerState}
+Parent: ${ticket.parentId ?? "map root"}
 Type: ${ticket.type}
 Mode: ${ticket.mode}
 Open blockers: ${ticket.blockedBy.join(", ") || "none"}
@@ -30,7 +33,7 @@ ${ticketContext}
 
 INSTRUCTIONS
 ${skillFor(ticket)}
-Stay inside the map's declared territory. Do not create, edit, close, or comment on tracker issues yourself; the parent cockpit owns tracker mutations. Do not broaden permissions. If you discover another question, report it instead of silently expanding scope.
+Stay inside the map's declared territory. Treat the ticket's canonical tracker as the only execution source of truth. When the canonical tracker is Jira, GitHub Wayfinder issues are historical evidence only: cite useful evidence, but never infer current status, assignment, blockers, or completion from GitHub. Do not create, edit, close, or comment on tracker issues yourself; the parent cockpit owns tracker mutations and must write verified progress back to Jira. Do not broaden permissions. If you discover another question, report it instead of silently expanding scope.
 
 End with:
 1. Answer or implementation summary.

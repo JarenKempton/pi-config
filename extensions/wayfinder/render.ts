@@ -89,6 +89,8 @@ function stateLabel(
 
 function ticketMeta(ticket: Ticket, theme: Theme) {
   const pieces: string[] = [ticket.type, ticket.mode];
+  if (ticket.trackerStatus) pieces.push(ticket.trackerStatus);
+  if (ticket.parentId) pieces.push(`under ${ticket.parentId}`);
   if (ticket.agent) pieces.push(`${ticket.agent.runtime} ${ticket.agent.state}`);
   if (ticket.workspace) pieces.push("worktree");
   if (ticket.review) pieces.push(`PR #${ticket.review.number}`);
@@ -104,7 +106,10 @@ function ticketLine(
 ) {
   const marker = selected ? theme.fg("accent", "›") : " ";
   const title = selected ? theme.bold(ticket.title) : theme.fg("text", ticket.title);
-  return `${marker} ${prefix}${stateLabel(ticket, delivery, theme)}  ${theme.fg("muted", ticket.id)}  ${title}`;
+  const hierarchy = ticket.hierarchyLevel && ticket.hierarchyLevel > 1
+    ? theme.fg("dim", `↳${ticket.parentId ? ` ${ticket.parentId}` : ""} `)
+    : "";
+  return `${marker} ${prefix}${stateLabel(ticket, delivery, theme)}  ${theme.fg("muted", ticket.id)}  ${hierarchy}${title}`;
 }
 
 function mapCounts(map: WayfinderMap) {
@@ -189,7 +194,7 @@ function mapPicker(
     theme.fg("dim", `Map ref ${selected.id}`),
     ...(migratedMap(selected)
       ? [
-          theme.fg("warning", "Canonical source: Linear · GitHub is a stale migration mirror"),
+          theme.fg("warning", `Canonical source: ${selected.source?.provider ?? "external"} · GitHub is a historical mirror`),
           theme.fg("dim", selected.source?.url ?? ""),
         ]
       : []),
@@ -217,6 +222,7 @@ function compactTicketDetail(
     ...wrap(ticket.question, Math.max(20, width)).map((line) => theme.fg("text", line)),
     "",
     section(theme, "RUNTIME STATE"),
+    `Jira status: ${ticket.trackerStatus ?? ticket.trackerState}${ticket.parentId ? ` · parent ${ticket.parentId}` : ""}`,
   ];
   if (ticket.blockedBy.length) {
     lines.push(`${theme.fg("error", "Blocked by")} ${ticket.blockedBy.join(", ")}`);
@@ -484,8 +490,9 @@ function ticketScreen(
     `${theme.bold(map.title)} ${theme.fg("dim", "/")} ${theme.bold(`${ticket.id} ${ticket.title}`)}`,
     `${stateLabel(ticket, delivery, theme)}  ${ticketMeta(ticket, theme)}  ${theme.fg("dim", ticket.url ?? "")}`,
     ...(ticket.trackerState === "migrated"
-      ? [theme.fg("warning", `Canonical Linear ticket ${ticket.source?.id ?? ""} is not loaded · ${ticket.source?.url ?? ""}`)]
+      ? [theme.fg("warning", `Canonical ${ticket.source?.provider ?? "external"} ticket ${ticket.source?.id ?? ""} is not loaded · ${ticket.source?.url ?? ""}`)]
       : []),
+    `Jira status: ${ticket.trackerStatus ?? ticket.trackerState}${ticket.parentId ? `  ·  Parent: ${ticket.parentId}` : ""}`,
     `Labels: ${ticket.labels?.join(", ") || "none"}  ·  Assignees: ${ticket.assignees?.map((name) => `@${name}`).join(", ") || "none"}`,
     `Open blockers: ${ticket.blockedBy.join(", ") || "none"}  ·  Dependencies recorded: ${dependencies.length}  ·  Comments: ${ticket.commentCount ?? ticket.comments?.length ?? 0}`,
   ];
@@ -528,9 +535,9 @@ function mapContextScreen(
     theme.bold(map.title),
     `${migratedMap(map) ? "MOVED" : map.state.toUpperCase()} · ${map.repository} · ${theme.fg("dim", map.url ?? map.id)}`,
     ...(migratedMap(map)
-      ? [theme.fg("warning", `Canonical Linear map not loaded · ${map.source?.url ?? ""}`)]
+      ? [theme.fg("warning", `Canonical ${map.source?.provider ?? "external"} map not loaded · ${map.source?.url ?? ""}`)]
       : []),
-    `Labels: ${map.labels?.join(", ") || "none"} · ${map.tickets.length} child tickets · updated ${map.updated}`,
+    `Labels: ${map.labels?.join(", ") || "none"} · ${map.tickets.length} Jira descendants · updated ${map.updated}`,
     theme.fg("borderMuted", "─".repeat(documentWidth)),
     ...visible.lines,
     "",
@@ -665,7 +672,8 @@ function agentsScreen(
     `State        ${selected.category}`,
     ...(ticket
       ? [
-          `Tracker      ${ticket.trackerState}`,
+          `Tracker      ${ticket.source?.provider ?? "unknown"} · ${ticket.trackerStatus ?? ticket.trackerState}`,
+          `Parent       ${ticket.parentId ?? "map root"}`,
           `Mode         ${ticket.mode}`,
           `Blockers     ${ticket.blockedBy.join(", ") || "none"}`,
         ]
