@@ -164,6 +164,7 @@ See [`vendor/davis/UPSTREAM.md`](vendor/davis/UPSTREAM.md) and [`vendor/davis/PA
 
 Other commands and tools:
 
+- Escape is guarded during an active agent run. Instead of aborting immediately, Pi asks for explicit confirmation; Escape still dismisses autocomplete and confirmation dialogs normally.
 - `/subagents` (or `Alt+S`) opens the background-agent list and takeover view in a bounded modal. Press `s` there—or use `/subagent-settings` directly—to configure future harness, model, effort, profile, and preset defaults from `subagents.json`.
 - `/wayfinder` opens the cockpit for Jira or GitHub epics, Wayfinder-labelled issues, or local `map.md`/`wayfinder.md` maps with an adjacent `issues/` ledger. `Alt+W` opens the cockpit; `Alt+A` opens Agent activity. Jira uses the official `acli` client and supports an optional `WAYFINDER_JIRA_MAP_JQL` map-root query. Configuration and run associations live privately under `~/.pi/agent/wayfinder/`; tracker content remains canonical in the configured issue tracker or Markdown files.
 - `/usage` (or `Alt+U`) opens refreshable Codex, Claude, and Cursor account status. Codex/Claude quota windows use progress bars; Cursor shows the authenticated subscription tier and active model because its CLI does not expose deterministic quota percentages. It is safe during an active run and never writes to the transcript or model context.
