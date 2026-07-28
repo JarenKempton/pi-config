@@ -181,7 +181,7 @@ test("Jira epics become one map with child work items and blocker state", () => 
   assert.equal(map.url, "https://example.atlassian.net/browse/TEAM-10");
   assert.equal(map.tickets.length, 1);
   assert.equal(map.tickets[0]?.id, "TEAM-11");
-  assert.equal(map.tickets[0]?.trackerState, "claimed");
+  assert.equal(map.tickets[0]?.trackerState, "open");
   assert.equal(map.tickets[0]?.mode, "AFK");
   assert.deepEqual(map.tickets[0]?.dependencies, [
     { id: "TEAM-9", title: "Choose the migration path", state: "closed" },
@@ -202,9 +202,34 @@ test("Jira loader scopes epic children to the selected ACLI board", async () => 
     if (args.includes("list-projects")) {
       return JSON.stringify({ projects: [{ key: "JWB" }] });
     }
+    if (args.includes("view")) {
+      const key = args[3];
+      if (key === "JWB-11") {
+        return JSON.stringify({
+          key,
+          fields: {
+            summary: "Child",
+            parent: { key: "JWB-10" },
+            status: { name: "To Do", statusCategory: { key: "new" } },
+            issuetype: { name: "Story" },
+          },
+        });
+      }
+      return JSON.stringify({
+        key: "JWB-10",
+        fields: {
+          summary: "Epic",
+          status: { name: "To Do", statusCategory: { key: "new" } },
+          issuetype: { name: "Epic" },
+        },
+      });
+    }
     const jql = args[args.indexOf("--jql") + 1];
-    if (jql?.startsWith("parent =")) {
-      return JSON.stringify({ issues: [{ key: "JWB-11", fields: { summary: "Child" } }] });
+    if (jql === 'project in ("JWB") ORDER BY rank') {
+      return JSON.stringify({ issues: [
+        { key: "JWB-10", fields: { summary: "Epic" } },
+        { key: "JWB-11", fields: { summary: "Child" } },
+      ] });
     }
     return JSON.stringify({ issues: [{ key: "JWB-10", fields: { summary: "Epic" } }] });
   }, "6");
@@ -213,8 +238,8 @@ test("Jira loader scopes epic children to the selected ACLI board", async () => 
   assert.equal(data.maps[0]?.tickets[0]?.id, "JWB-11");
   assert.equal(data.jiraBoards?.[0]?.name, "Jaren's Workbench");
   assert.equal(data.configuredJiraBoardId, "6");
-  assert.deepEqual(calls[0], ["jira", "auth", "status"]);
-  const searches = calls.filter((args) => args.includes("workitem"));
+  assert.deepEqual(calls[0], ["auth", "status"]);
+  const searches = calls.filter((args) => args.includes("search") && args.includes("workitem"));
   assert.equal(
     searches[0]?.[searches[0].indexOf("--jql") + 1],
     'project in ("JWB") AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC',
@@ -224,7 +249,12 @@ test("Jira loader scopes epic children to the selected ACLI board", async () => 
   assert.ok(!fields.includes("updated"));
   assert.ok(!fields.includes("parent"));
   assert.ok(!fields.includes("issuelinks"));
-  assert.ok(searches[1]?.includes("parent = JWB-10 ORDER BY rank"));
+  assert.equal(
+    searches[1]?.[searches[1].indexOf("--jql") + 1],
+    'project in ("JWB") ORDER BY rank',
+  );
+  assert.ok(calls.some((args) => args.includes("view") && args.includes("JWB-10")));
+  assert.ok(calls.some((args) => args.includes("view") && args.includes("JWB-11")));
 });
 
 test("Jira board selection cycles inside tracker settings", () => {
