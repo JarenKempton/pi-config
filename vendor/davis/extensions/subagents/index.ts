@@ -44,7 +44,12 @@ import {
   SUBAGENT_INFO_CHANNEL,
   type SubagentInfoState,
 } from "../shared/dashboard-state.ts";
-import { deriveBtwTitle, isModelVisible } from "./src/by-the-way.ts";
+import {
+  buildBtwParentHandoff,
+  buildBtwWorkerContract,
+  deriveBtwTitle,
+  isModelVisible,
+} from "./src/by-the-way.ts";
 import {
   loadSubagentConfig,
   resolveSpawnConfig,
@@ -55,6 +60,7 @@ import {
   latestText,
   REASONING_EFFORTS,
   SUBAGENT_PROFILES,
+  type BackendName,
   type SubagentSnapshot,
 } from "./src/domain.ts";
 import {
@@ -93,6 +99,7 @@ import {
   openSubagentPicker,
   openSubagentSettings,
   openSubagentTakeover,
+  type TakeoverAction,
 } from "./src/ui/takeover.ts";
 
 const SUBAGENT_OUTPUT_MAX_BYTES = 24 * 1024;
@@ -807,6 +814,126 @@ export default function (pi: ExtensionAPI) {
 
   // --- Commands -----------------------------------------------------------
 
+  const parentContext = (ctx: ExtensionContext) => ({
+    parentCwd: ctx.cwd,
+    projectTrusted: ctx.isProjectTrusted(),
+    inheritedModel: ctx.model
+      ? { provider: ctx.model.provider, id: ctx.model.id }
+      : undefined,
+    inheritedThinkingLevel: pi.getThinkingLevel(),
+    modelRegistry: ctx.modelRegistry,
+  });
+
+  const takeoverOptions = (snap: SubagentSnapshot) => ({
+    badge: snap.profile === "worker" ? "by the way worker" : "by the way",
+    allowQueueToParent: snap.origin === "btw",
+    allowWorkerHandoff: snap.origin === "btw" && snap.profile !== "worker",
+  });
+
+  const queueLatestToParent = (ctx: ExtensionContext, snap: SubagentSnapshot) => {
+    const answer = latestText(snap).trim();
+    if (!answer) {
+      ctx.ui.notify("No BTW answer is available to queue.", "warning");
+      return;
+    }
+    const message = buildBtwParentHandoff(snap.title, answer);
+    if (ctx.isIdle()) pi.sendUserMessage(message);
+    else pi.sendUserMessage(message, { deliverAs: "followUp" });
+    ctx.ui.notify("Latest BTW answer queued to the parent thread.", "info");
+  };
+
+  const spawnApprovedBtwWorker = async (
+    ctx: ExtensionContext,
+    planner: SubagentSnapshot,
+  ) => {
+    const draft = buildBtwWorkerContract(planner.prompt, planner.finalText);
+    const contract = (await ctx.ui.editor("Review the worker contract", draft))?.trim();
+    if (!contract) return;
+
+    const contractApproved = await ctx.ui.confirm(
+      "Approve this work contract?",
+      "This exact contract will become the worker's authoritative scope. Continue to executioner selection?",
+    );
+    if (!contractApproved) return;
+
+    const choices: Array<{ label: string; harness: BackendName }> = [
+      { label: "Pi worker — project-confined edits, no shell", harness: "pi" },
+      { label: "Codex worker — sandboxed project execution", harness: "codex" },
+      { label: "Claude worker — sandboxed project execution", harness: "claude" },
+    ];
+    const selected = await ctx.ui.select(
+      "Choose the worker executioner",
+      choices.map((choice) => choice.label),
+    );
+    const harness = choices.find((choice) => choice.label === selected)?.harness;
+    if (!harness) return;
+
+    const configured = resolveSpawnConfig(await loadSubagentConfig(), {
+      harness,
+      profile: "worker",
+    });
+    const executionApproved = await ctx.ui.confirm(
+      "Approve worker execution?",
+      [
+        `Harness: ${configured.harness}`,
+        `Model: ${configured.model ?? "native/inherited default"}`,
+        `Effort: ${configured.reasoningEffort ?? "native/inherited default"}`,
+        "Profile: worker (project-confined edits)",
+        `Working directory: ${ctx.cwd}`,
+        "The parent may still be active. Avoid approving overlapping file edits unless the contract makes coordination explicit.",
+      ].join("\n"),
+    );
+    if (!executionApproved) return;
+
+    const manager = await getManager();
+    try {
+      return await runTool(
+        getRuntime(),
+        manager.spawn(configured.harness, {
+          origin: "btw",
+          prompt: [
+            "You are the execution worker for a user-approved BTW handoff.",
+            "The approved work contract below is authoritative. Do not expand scope or guess through a stop condition.",
+            "",
+            contract,
+          ].join("\n"),
+          title: deriveBtwTitle(`Execute: ${planner.title}`),
+          cwd: ctx.cwd,
+          model: configured.model,
+          reasoningEffort: configured.reasoningEffort,
+          profile: "worker",
+          parent: parentContext(ctx),
+        }),
+      );
+    } catch (error) {
+      ctx.ui.notify(
+        error instanceof Error ? error.message : String(error),
+        "error",
+      );
+      return;
+    }
+  };
+
+  const handleTakeoverAction = async (
+    ctx: ExtensionContext,
+    action: TakeoverAction,
+    snap: SubagentSnapshot,
+  ) => {
+    if (action === "queue-latest") {
+      queueLatestToParent(ctx, snap);
+      return;
+    }
+    const worker = await spawnApprovedBtwWorker(ctx, snap);
+    if (!worker) return;
+    const workerAction = await openSubagentTakeover(
+      ctx,
+      (await getManager()).view,
+      worker.id,
+      takeoverOptions(worker),
+    );
+    if (workerAction === "queue-latest") queueLatestToParent(ctx, worker);
+  };
+
   const runByTheWay = async (rawArgs: string, ctx: ExtensionCommandContext) => {
     if (ctx.mode !== "tui") {
       if (ctx.hasUI)
@@ -839,15 +966,7 @@ export default function (pi: ExtensionAPI) {
           // Side questions must remain read-only even when Pi's general
           // harness default is configured for project editing.
           profile: "scout",
-          parent: {
-            parentCwd: ctx.cwd,
-            projectTrusted: ctx.isProjectTrusted(),
-            inheritedModel: ctx.model
-              ? { provider: ctx.model.provider, id: ctx.model.id }
-              : undefined,
-            inheritedThinkingLevel: pi.getThinkingLevel(),
-            modelRegistry: ctx.modelRegistry,
-          },
+          parent: parentContext(ctx),
         }),
       );
     } catch (error) {
@@ -858,9 +977,13 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    await openSubagentTakeover(ctx, manager.view, snap.id, {
-      badge: "by the way",
-    });
+    const action = await openSubagentTakeover(
+      ctx,
+      manager.view,
+      snap.id,
+      takeoverOptions(snap),
+    );
+    if (action) await handleTakeoverAction(ctx, action, snap);
   };
 
   pi.registerCommand("btw", {
@@ -886,7 +1009,11 @@ export default function (pi: ExtensionAPI) {
       );
       return;
     }
-    await openSubagentPicker(ctx, manager.view);
+    await openSubagentPicker(ctx, manager.view, {
+      takeoverOptions: (snap) =>
+        snap.origin === "btw" ? takeoverOptions(snap) : undefined,
+      onAction: (action, snap) => handleTakeoverAction(ctx, action, snap),
+    });
   };
 
   pi.registerCommand("subagents", {

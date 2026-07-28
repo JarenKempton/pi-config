@@ -11,7 +11,10 @@ import type {
   KeybindingsManager,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import {
+  copyToClipboard,
+  getSettingsListTheme,
+} from "@earendil-works/pi-coding-agent";
 import type {
   Component,
   Focusable,
@@ -38,6 +41,7 @@ import {
 import {
   BACKEND_NAMES,
   formatElapsed,
+  latestText,
   REASONING_EFFORTS,
   SUBAGENT_PROFILES,
   type BackendName,
@@ -51,7 +55,7 @@ import {
 } from "../backends/cursor.ts";
 import { formatContextUtilization } from "../format.ts";
 import type { SubagentReadModel } from "../manager.ts";
-import { buildTranscriptLines } from "./transcript.ts";
+import { buildTranscriptLines, transcriptToMarkdown } from "./transcript.ts";
 
 function configuredKeys(
   keybindings: KeybindingsManager,
@@ -97,8 +101,18 @@ function modalHeight(tui: TUI) {
   return Math.max(12, Math.min(34, Math.floor(rows * 0.84)));
 }
 
+export type TakeoverAction = "queue-latest" | "worker-handoff";
+
 export interface TakeoverOptions {
   readonly badge?: string;
+  readonly allowQueueToParent?: boolean;
+  readonly allowWorkerHandoff?: boolean;
+  readonly notify?: (message: string, level: "info" | "warning" | "error") => void;
+}
+
+export interface PickerOptions {
+  readonly takeoverOptions?: (snap: SubagentSnapshot) => TakeoverOptions | undefined;
+  readonly onAction?: (action: TakeoverAction, snap: SubagentSnapshot) => Promise<void> | void;
 }
 
 export async function openSubagentTakeover(
@@ -108,9 +122,12 @@ export async function openSubagentTakeover(
   options?: TakeoverOptions,
 ) {
   if (!view.get(id)) return;
-  await ctx.ui.custom<null>(
+  return ctx.ui.custom<TakeoverAction | null>(
     (tui, theme, keybindings, done) =>
-      new TakeoverView(tui, theme, keybindings, id, view, done, options),
+      new TakeoverView(tui, theme, keybindings, id, view, done, {
+        ...options,
+        notify: options?.notify ?? ((message, level) => ctx.ui.notify(message, level)),
+      }),
     {
       overlay: true,
       overlayOptions: SUBAGENT_MODAL_OPTIONS,
@@ -121,6 +138,7 @@ export async function openSubagentTakeover(
 export async function openSubagentPicker(
   ctx: ExtensionContext,
   view: SubagentReadModel,
+  options?: PickerOptions,
 ) {
   const selection: DashboardSelection = { index: 0 };
 
@@ -146,8 +164,16 @@ export async function openSubagentPicker(
     }
     if (!view.get(picked)) continue;
 
-    await openSubagentTakeover(ctx, view, picked);
-    // After leaving the takeover view, fall back to the dashboard.
+    const snap = view.get(picked);
+    if (!snap) continue;
+    const action = await openSubagentTakeover(
+      ctx,
+      view,
+      picked,
+      options?.takeoverOptions?.(snap),
+    );
+    if (action) await options?.onAction?.(action, snap);
+    // After leaving the takeover view or its action, fall back to the dashboard.
   }
 }
 
@@ -753,7 +779,7 @@ class TakeoverView implements Component, Focusable {
   private keybindings: KeybindingsManager;
   private id: string;
   private view: SubagentReadModel;
-  private done: (value: null) => void;
+  private done: (value: TakeoverAction | null) => void;
   private options?: TakeoverOptions;
 
   private input = new Input();
@@ -779,7 +805,7 @@ class TakeoverView implements Component, Focusable {
     keybindings: KeybindingsManager,
     id: string,
     view: SubagentReadModel,
-    done: (value: null) => void,
+    done: (value: TakeoverAction | null) => void,
     options?: TakeoverOptions,
   ) {
     this.tui = tui;
@@ -826,8 +852,23 @@ class TakeoverView implements Component, Focusable {
     return true;
   }
 
-  private close() {
-    if (this.cleanup()) this.done(null);
+  private close(action: TakeoverAction | null = null) {
+    if (this.cleanup()) this.done(action);
+  }
+
+  private copy(text: string, label: string) {
+    if (!text.trim()) {
+      this.options?.notify?.(`No ${label.toLowerCase()} is available yet.`, "warning");
+      return;
+    }
+    void copyToClipboard(text)
+      .then(() => this.options?.notify?.(`${label} copied to clipboard.`, "info"))
+      .catch((error) =>
+        this.options?.notify?.(
+          `Unable to copy ${label.toLowerCase()}: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        ),
+      );
   }
 
   dispose(): void {
@@ -835,6 +876,32 @@ class TakeoverView implements Component, Focusable {
   }
 
   handleInput(data: string): void {
+    const snap = this.snap();
+    const inputEmpty = this.input.getValue().length === 0;
+    if (inputEmpty && data === "c") {
+      this.copy(snap ? latestText(snap) : "", "Latest answer");
+      return;
+    }
+    if (inputEmpty && data === "C") {
+      if (snap) this.copy(transcriptToMarkdown(snap), "Full transcript");
+      return;
+    }
+    if (inputEmpty && (data === "q" || data === "Q") && this.options?.allowQueueToParent) {
+      if (!snap?.finalText.trim()) {
+        this.options.notify?.("Wait for a completed answer before queueing it to the parent.", "warning");
+        return;
+      }
+      this.close("queue-latest");
+      return;
+    }
+    if (inputEmpty && (data === "w" || data === "W") && this.options?.allowWorkerHandoff) {
+      if (!snap?.finalText.trim()) {
+        this.options.notify?.("Wait for a completed BTW answer before creating a worker contract.", "warning");
+        return;
+      }
+      this.close("worker-handoff");
+      return;
+    }
     if (this.keybindings.matches(data, "app.clear")) {
       const snap = this.snap();
       if (snap?.status === "running") this.view.requestAbort(this.id);
@@ -948,15 +1015,17 @@ class TakeoverView implements Component, Focusable {
 
     lines.push(border);
     lines.push(...this.input.render(width));
-    lines.push(
-      truncateToWidth(
-        theme.fg(
-          "dim",
-          `${configuredKeys(this.keybindings, "tui.input.submit")} send · ${configuredKeys(this.keybindings, "app.interrupt")} back · ${configuredKeys(this.keybindings, "app.clear")} abort run · ${configuredKeys(this.keybindings, "tui.editor.cursorUp")}/${configuredKeys(this.keybindings, "tui.editor.cursorDown")} scroll · ${configuredKeys(this.keybindings, "tui.editor.pageUp")}/${configuredKeys(this.keybindings, "tui.editor.pageDown")} page`,
-        ),
-        width,
-      ),
-    );
+    const actions = [
+      "c copy answer",
+      "C copy transcript",
+      this.options?.allowQueueToParent ? "q queue to parent" : undefined,
+      this.options?.allowWorkerHandoff ? "w hand off to worker" : undefined,
+      `${configuredKeys(this.keybindings, "tui.input.submit")} send`,
+      `${configuredKeys(this.keybindings, "app.interrupt")} back`,
+      `${configuredKeys(this.keybindings, "app.clear")} abort`,
+      `${configuredKeys(this.keybindings, "tui.editor.cursorUp")}/${configuredKeys(this.keybindings, "tui.editor.cursorDown")} scroll`,
+    ].filter(Boolean).join(" · ");
+    lines.push(truncateToWidth(theme.fg("dim", actions), width));
     lines.push(border);
     return lines;
   }

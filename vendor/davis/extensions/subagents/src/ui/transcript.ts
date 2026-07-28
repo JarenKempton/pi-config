@@ -112,6 +112,40 @@ function renderToolResultItem(
   );
 }
 
+/** Build clipboard-safe Markdown without exposing hidden reasoning text. */
+export function transcriptToMarkdown(snap: SubagentSnapshot): string {
+  const sections: string[] = [];
+  for (const item of snap.transcript) {
+    if (item.kind === "user") {
+      const value = sanitizeText(item.text).trim();
+      if (value) sections.push(`## User\n\n${value}`);
+      continue;
+    }
+    if (item.kind === "assistant") {
+      const parts: string[] = [];
+      for (const part of item.parts) {
+        if (part.type === "text") {
+          const value = sanitizeText(part.text).trim();
+          if (value) parts.push(value);
+        } else if (part.type === "toolCall") {
+          const preview = sanitizeText(part.argsPreview ?? "").trim();
+          parts.push(`_Tool: ${part.name}${preview && preview !== "{}" ? ` — ${preview}` : ""}_`);
+        }
+      }
+      if (parts.length) sections.push(`## Assistant\n\n${parts.join("\n\n")}`);
+      continue;
+    }
+    const preview = sanitizeText(item.outputPreview ?? "").trim();
+    sections.push(`## Tool result${item.isError ? " (error)" : ""}\n\n${preview || "(no output)"}`);
+  }
+  const live = sanitizeText(snap.liveAssistant?.text ?? "").trim();
+  if (live) sections.push(`## Assistant (streaming)\n\n${live}`);
+  for (const message of snap.queued) {
+    sections.push(`## User (queued ${message.kind})\n\n${sanitizeText(message.text).trim()}`);
+  }
+  return `# ${sanitizeText(snap.title)}\n\n${sections.join("\n\n")}`.trim();
+}
+
 /** Render a subagent's conversation as plain lines, wrapped to `width`. */
 export function buildTranscriptLines(
   snap: SubagentSnapshot,
