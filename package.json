@@ -34,6 +34,7 @@
     "extensions": [
       "./extensions/*.ts",
       "./extensions/web-search/index.ts",
+      "./vendor/davis/extensions/ask-user/index.ts",
       "./vendor/davis/extensions/subagents/index.ts",
       "./vendor/davis/extensions/workflows/index.ts",
       "./vendor/davis/extensions/model-info/index.ts",
