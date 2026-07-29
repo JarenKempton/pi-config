@@ -90,17 +90,37 @@ Enter this mode when the user says they want to teach the skill, update its pref
 
 Never silently rewrite preferences, infer approval from participation, or combine preference persistence with HTML generation authorization. After editing, report exactly what changed.
 
+## Choose and remember local storage
+
+New plans remain local until the user separately authorizes publication. Local HTML is canonical regardless of later hosted state.
+
+Before generating a project's first HTML plan:
+
+1. Resolve the project root to its canonical absolute path. Prefer the canonical git root when one exists; otherwise resolve the working directory without symlinks.
+2. Read `/Users/jaren/.pi/agent/plans/.project-preferences.json` as strict JSON and validate schema version `1` before trusting it.
+3. If exactly one entry matches the canonical project path, reuse its `central` or `project-local` destination without asking again.
+4. If no entry matches, ask one `ask_user` question offering:
+   - **Central plan library** at `/Users/jaren/.pi/agent/plans/` — recommend this for personal cross-project access unless the repository has a strong artifact convention.
+   - **Project-local** — use the repository's existing artifact or report convention, falling back to `artifacts/`.
+5. Persist the answer only after the user chooses. Update the preference registry atomically without changing other projects. Keep the directory mode `0700` and metadata mode `0600`.
+6. If the registry is missing, initialize `{ "schemaVersion": 1, "projects": [] }`. If it is malformed, duplicated, unsupported, or ambiguous, stop and ask before repairing it; never silently replace valid state.
+
+When the user explicitly requests a destination change, update that one canonical project entry and report the old and new value.
+
 ## Generate the artifact
 
-After the gate passes:
+After the gate passes and storage is resolved:
 
-1. Determine the project's existing artifact or report convention by inspection. Use it if present; otherwise create the file under `artifacts/`.
+1. Choose a canonical lowercase filename ending in `.html`. For central storage, write `/Users/jaren/.pi/agent/plans/<filename>`; for project-local storage, use the selected project convention.
 2. Create one self-contained `.html` file. Embed CSS and any approved JavaScript. Do not use external runtime dependencies, CDNs, remote fonts, analytics, or remotely hosted assets unless the user approved them.
 3. Apply polished information design rather than a document dump: clear hierarchy, scannable sections, restrained visual system, meaningful status/dependency cues, and useful navigation or interaction where it improves comprehension.
 4. Use accessible semantic HTML, logical heading order, keyboard-operable controls, visible focus states, sufficient contrast, reduced-motion support, responsive layouts, and print styles.
 5. Include the plan's decisions, assumptions, unresolved items, phases, dependencies, risks, success criteria, and next actions. Clearly distinguish facts, decisions, and assumptions.
 6. Add factual citations and links near claims whenever research materially informs the plan.
-7. Do not implement the plan's product, code changes, migrations, or operational steps. The HTML artifact is a planning deliverable only.
+7. Set central plan files to mode `0600`. Project-local files follow repository policy unless it is less restrictive for sensitive content.
+8. Register every central plan in `/Users/jaren/.pi/agent/plans/.registry.json` using schema version `1`, an opaque stable `pln_` ID, title, filename, canonical file path, canonical source-project path, and timestamps. Preserve the plan ID across edits. Require unique IDs and canonical paths, validate before writing, and update atomically with mode `0600`.
+9. If either registry is malformed, duplicated, unsupported, or ambiguous, stop and report it rather than guessing or overwriting it.
+10. Do not implement the plan's product, code changes, migrations, publication, or operational steps. The HTML artifact is a planning deliverable only.
 
 ## Charts, diagrams, and graphs
 
