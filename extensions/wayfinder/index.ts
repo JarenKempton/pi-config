@@ -1,6 +1,5 @@
 import type {
   ExtensionAPI,
-  ExtensionCommandContext,
   ExtensionContext,
   Theme,
 } from "@earendil-works/pi-coding-agent";
@@ -87,6 +86,7 @@ function snapshotRun(snapshot: SubagentSnapshot): WayfinderRun {
     profile: snapshot.profile === "unrestricted" ? "worker" : snapshot.profile,
     cwd: snapshot.cwd,
     status: snapshot.status,
+    attached: true,
     createdAt: snapshot.createdAt,
     updatedAt: snapshot.settledAt ?? Date.now(),
     sessionFilePath: snapshot.meta.sessionFilePath,
@@ -237,18 +237,26 @@ export class WayfinderCockpitComponent {
     if (this.disposed) return;
     try {
       const selectedActivityId = buildActivityItems(this.data)[this.state.agentIndex]?.id;
-      const runs = await loadRuns(this.workspaceKey);
+      const [persistedRuns, snapshots] = await Promise.all([
+        loadRuns(this.workspaceKey),
+        this.host?.list() ?? Promise.resolve([]),
+      ]);
       if (this.disposed) return;
+      const attachedIds = new Set(snapshots.map((snapshot) => snapshot.id));
+      const runs = persistedRuns.map((run) => ({
+        ...run,
+        attached: attachedIds.has(run.id),
+      }));
       const persistedIds = new Set(runs.map((run) => run.id));
-      const ephemeral = (this.data.runs ?? []).filter(
-        (run) => run.mapId === "unlinked" && !persistedIds.has(run.id),
-      );
+      const ephemeral = (this.data.runs ?? [])
+        .filter((run) => run.mapId === "unlinked" && !persistedIds.has(run.id))
+        .map((run) => ({ ...run, attached: attachedIds.has(run.id) }));
       const merged = [...runs, ...ephemeral];
       const previous = (this.data.runs ?? [])
-        .map((run) => `${run.id}:${run.status}:${run.updatedAt}`)
+        .map((run) => `${run.id}:${run.status}:${run.updatedAt}:${run.attached ? 1 : 0}`)
         .join("|");
       const next = merged
-        .map((run) => `${run.id}:${run.status}:${run.updatedAt}`)
+        .map((run) => `${run.id}:${run.status}:${run.updatedAt}:${run.attached ? 1 : 0}`)
         .join("|");
       if (previous === next) return;
       this.data.runs = merged;
@@ -282,7 +290,11 @@ export class WayfinderCockpitComponent {
       const snapshots = await this.host.list();
       await syncRuns(snapshots);
       if (this.disposed) return;
-      const linked = await loadRuns(this.workspaceRoot);
+      const attachedIds = new Set(snapshots.map((snapshot) => snapshot.id));
+      const linked = (await loadRuns(this.workspaceRoot)).map((run) => ({
+        ...run,
+        attached: attachedIds.has(run.id),
+      }));
       const linkedIds = new Set(linked.map((run) => run.id));
       const unlinked = snapshots
         .filter((snapshot) => !linkedIds.has(snapshot.id))
@@ -478,8 +490,20 @@ export class WayfinderCockpitComponent {
     const map = selectedMap(this.state, this.data);
     const ticket = selectedTicket(this.state, this.data);
     const existing = this.selectedRun();
+    if (existing?.attached) {
+      this.ctx.ui.notify(
+        existing.status === "running"
+          ? "This ticket already has a running agent. Press j to join it."
+          : "This agent is still attached. Press j to reopen and continue it.",
+        "info",
+      );
+      return;
+    }
     if (existing?.status === "running") {
-      this.ctx.ui.notify("This ticket already has a running agent.", "warning");
+      this.ctx.ui.notify(
+        "This ticket has an agent running in another Pi instance. Cross-instance takeover is not available yet.",
+        "warning",
+      );
       return;
     }
     if (map.source?.provider !== "github" && map.mirror) {
@@ -584,7 +608,7 @@ export class WayfinderCockpitComponent {
       agentStarted = true;
       const run = await recordRun(map.id, ticket.id, snapshot);
       this.data.runs = [
-        run,
+        { ...run, attached: true },
         ...(this.data.runs ?? []).filter((candidate) => candidate.id !== run.id),
       ];
       this.state = { ...this.state, confirmStart: undefined };
@@ -628,35 +652,25 @@ export class WayfinderCockpitComponent {
       await this.host.takeover(this.ctx, run.id);
       return;
     }
-    if (run.backend === "Pi" && run.sessionFilePath) {
-      if (!("switchSession" in this.ctx)) {
-        this.ctx.ui.notify(
-          "Open /wayfinder to switch into an archived Pi session; shortcuts can only attach to active agents.",
-          "info",
-        );
-        return;
-      }
-      const confirmed = await this.ctx.ui.confirm(
-        "Switch to archived Pi session?",
-        `This leaves the current session and opens ${run.sessionFilePath}`,
-      );
-      if (!confirmed) return;
-      this.done();
-      await (this.ctx as ExtensionCommandContext).switchSession(run.sessionFilePath);
-      return;
-    }
     this.ctx.ui.notify(
-      run.sessionFilePath
-        ? `The archived ${run.backend} transcript is at ${run.sessionFilePath}. Start a continuation from the ticket to resume it.`
-        : "This agent is no longer attached to the active runtime.",
+      run.status === "running"
+        ? "This agent is owned by another Pi instance. Cross-instance takeover is not available yet."
+        : run.sessionFilePath
+          ? `This agent is no longer attached here. Press n to continue it with a new agent; its transcript remains at ${run.sessionFilePath}.`
+          : "This agent is no longer attached here. Press n to continue it with a new agent.",
       "info",
     );
   }
 
   private async cancelSelectedRun() {
     const run = this.selectedRun();
-    if (!run || run.status !== "running" || !this.host) {
-      this.ctx.ui.notify("No running agent is linked to this selection.", "info");
+    if (!run || run.status !== "running" || !run.attached || !this.host) {
+      this.ctx.ui.notify(
+        run?.status === "running" && !run.attached
+          ? "This agent is running in another Pi instance and cannot be cancelled here."
+          : "No locally attached running agent is linked to this selection.",
+        "info",
+      );
       return;
     }
     const confirmed = await this.ctx.ui.confirm(

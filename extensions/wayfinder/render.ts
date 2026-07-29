@@ -208,6 +208,18 @@ function mapPicker(
   return [...list, "", ...detail.slice(0, 8)];
 }
 
+function agentActionHint(run?: WayfinderRun) {
+  if (!run) return "n start agent";
+  if (run.attached) {
+    return run.status === "running"
+      ? "j join agent · x cancel agent"
+      : "j reopen agent";
+  }
+  return run.status === "running"
+    ? "running in another Pi · takeover unavailable"
+    : "n continue with new agent";
+}
+
 function compactTicketDetail(
   ticket: Ticket,
   delivery: DeliveryProfile,
@@ -268,12 +280,7 @@ function compactTicketDetail(
   } else {
     lines.push(
       "",
-      theme.fg(
-        "dim",
-        run?.status === "running"
-          ? "j join agent · x cancel agent"
-          : "n start agent",
-      ),
+      theme.fg("dim", agentActionHint(run)),
     );
   }
   return lines;
@@ -1134,13 +1141,22 @@ function breadcrumbs(state: CockpitState, data: CockpitData) {
   return "Settings / Model routing / Simulator";
 }
 
-function footer(state: CockpitState) {
+function footer(state: CockpitState, data: CockpitData) {
   if (state.confirmStart) {
     return `Start ${state.confirmStart.ticketId}? · y/enter confirm · esc cancel`;
   }
   if (state.screen === "maps") return "↑↓ select · enter open · g agents · s settings · q close";
-  if (state.screen === "map") return "↑↓ select · n start · j join · x cancel · enter ticket · c context · g agents · esc back";
-  if (state.screen === "ticket") return "r details · n start · j join · x cancel · g agents · ↑↓ scroll · esc back";
+  if (state.screen === "map" || state.screen === "ticket") {
+    const map = selectedMap(state, data);
+    const ticket = selectedTicket(state, data);
+    const run = data.runs?.find(
+      (candidate) => candidate.mapId === map.id && candidate.ticketId === ticket.id,
+    );
+    const action = agentActionHint(run);
+    return state.screen === "map"
+      ? `↑↓ select · ${action} · enter ticket · c context · g agents · esc back`
+      : `r details · ${action} · g agents · ↑↓ scroll · esc back`;
+  }
   if (state.screen === "map-context") return "↑↓/PgUp/PgDn scroll · esc back · q close";
   if (state.screen === "attention") return "↑↓ select · a accept · f Fog · d dismiss · esc back · q close";
   if (state.screen === "agents") return "↑↓ select · enter open/join · x cancel agent · m maps · esc back · q close";
@@ -1220,7 +1236,7 @@ export function renderCockpit(
   lines.push(
     row(state.notice ? ` ${theme.fg("warning", fit(state.notice, innerWidth - 2))}` : ""),
     row(""),
-    row(` ${theme.fg("dim", footer(state))}`),
+    row(` ${theme.fg("dim", footer(state, data))}`),
     `${theme.fg("border", "╰")}${theme.fg("border", "─".repeat(innerWidth))}${theme.fg("border", "╯")}`,
   );
   return lines;

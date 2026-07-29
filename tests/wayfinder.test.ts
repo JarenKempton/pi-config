@@ -69,12 +69,46 @@ test("Wayfinder and subagents share the host bridge across isolated extension mo
   }
 });
 
-test("the map details view advertises direct start, join, and inline confirmation", () => {
-  const data = structuredClone(defaultData);
+test("the map details view advertises only actions available for the selected agent state", () => {
+  const data = structuredClone(defaultData) as CockpitData;
   const state = reduceCockpit(initialState(data), { type: "enter" }, data);
-  const output = renderCockpit(state, data, theme, 120, 25).join("\n");
-  assert.match(output, /n start/);
-  assert.match(output, /j join/);
+  const map = data.maps[state.mapIndex]!;
+  const ticket = map.tickets.find((candidate) => candidate.id === state.selectedTicketId)!;
+
+  const withoutRun = renderCockpit(state, data, theme, 120, 25).join("\n");
+  assert.match(withoutRun, /n start agent/);
+  assert.doesNotMatch(withoutRun, /j join/);
+  assert.doesNotMatch(withoutRun, /x cancel agent/);
+
+  data.runs = [{
+    id: "sa-local",
+    mapId: map.id,
+    ticketId: ticket.id,
+    title: ticket.title,
+    backend: "Pi",
+    profile: "worker",
+    cwd: "/repo",
+    status: "running",
+    createdAt: 1,
+    updatedAt: 2,
+    attached: true,
+  }];
+  const localRun = renderCockpit(state, data, theme, 120, 25).join("\n");
+  assert.match(localRun, /j join agent/);
+  assert.match(localRun, /x cancel agent/);
+  assert.doesNotMatch(localRun, /n start agent/);
+
+  data.runs[0] = { ...data.runs[0]!, attached: false };
+  const remoteRun = renderCockpit(state, data, theme, 120, 25).join("\n");
+  assert.match(remoteRun, /running in another Pi/);
+  assert.doesNotMatch(remoteRun, /j join agent/);
+  assert.doesNotMatch(remoteRun, /n start agent/);
+  assert.doesNotMatch(remoteRun, /x cancel agent/);
+
+  data.runs[0] = { ...data.runs[0]!, status: "done" };
+  const archivedRun = renderCockpit(state, data, theme, 120, 25).join("\n");
+  assert.match(archivedRun, /n continue with new agent/);
+  assert.doesNotMatch(archivedRun, /j join agent/);
 
   const confirming = renderCockpit(
     {

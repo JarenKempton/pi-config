@@ -209,6 +209,8 @@ export interface WayfinderRun {
   createdAt: number;
   updatedAt: number;
   ownerPid?: number;
+  /** True only while this Pi process has a live subagent controller for the run. */
+  attached?: boolean;
   sessionFilePath?: string;
   nativeSessionId?: string;
   finalText?: string;
