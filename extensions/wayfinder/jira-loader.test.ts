@@ -63,7 +63,9 @@ test("Jira maps include parent tickets and subtasks with native statuses", () =>
     subtask: true,
     links: [{
       type: { name: "Blocks", inward: "is blocked by", outward: "blocks" },
-      inwardIssue: issue("JWB-999", "To Do"),
+      // ACLI/Jira returns the blocker as outwardIssue when the viewed issue
+      // is on the "is blocked by" side of a Blocks link.
+      outwardIssue: issue("JWB-999", "To Do"),
     }],
   });
   const map = mapFromJira(

@@ -215,8 +215,9 @@ function dependencyRefs(issue: JiraWorkItem): DependencyRef[] {
   const dependencies: DependencyRef[] = [];
   for (const link of issue.fields?.issuelinks ?? []) {
     const type = link.type?.name?.toLowerCase() ?? "";
-    // For Jira's Blocks link, an inwardIssue is the issue that blocks this one.
-    const blocker = type.includes("block") ? link.inwardIssue : undefined;
+    // In Jira's issue-link payload, when the viewed issue is on the
+    // "is blocked by" side, the blocking work item is exposed as outwardIssue.
+    const blocker = type.includes("block") ? link.outwardIssue : undefined;
     if (!blocker) continue;
     dependencies.push({
       id: blocker.key,

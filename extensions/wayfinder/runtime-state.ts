@@ -118,7 +118,9 @@ export async function recordRun(
   return withStateLock(async () => {
     const document = await readDocument();
     const now = Date.now();
-    const existing = document.runs.find((run) => run.id === snapshot.id);
+    const existing = document.runs.find(
+      (run) => run.id === snapshot.id && run.ownerPid === process.pid,
+    );
     const run: WayfinderRun = {
       id: snapshot.id,
       mapId,
@@ -143,7 +145,9 @@ export async function recordRun(
     };
     document.runs = [
       run,
-      ...document.runs.filter((item) => item.id !== run.id),
+      ...document.runs.filter(
+        (item) => item.id !== run.id || item.ownerPid !== process.pid,
+      ),
     ].slice(0, 500);
     await writeDocument(document);
     return run;
@@ -155,7 +159,11 @@ export async function syncRuns(snapshots: ReadonlyArray<SubagentSnapshot>) {
     const document = await readDocument();
     let changed = false;
     for (const snapshot of snapshots) {
-      const run = document.runs.find((item) => item.id === snapshot.id);
+      // Subagent IDs restart at sa-1 in every Pi process. Only the process
+      // that owns a persisted association may reconcile it from its host.
+      const run = document.runs.find(
+        (item) => item.id === snapshot.id && item.ownerPid === process.pid,
+      );
       if (!run) continue;
       const next = {
         status: snapshot.status,

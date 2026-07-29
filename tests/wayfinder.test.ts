@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { buildActivityItems } from "../extensions/wayfinder/activity.ts";
+import { defaultWorkspaceSettings } from "../extensions/wayfinder/config.ts";
 import { defaultData } from "../extensions/wayfinder/defaults.ts";
 import {
   findTrackerMigration,
@@ -28,6 +29,7 @@ import {
 } from "../extensions/wayfinder/state.ts";
 import wayfinderExtension, {
   filterCachedMaps,
+  WayfinderCockpitComponent,
 } from "../extensions/wayfinder/index.ts";
 import type { CockpitData } from "../extensions/wayfinder/types.ts";
 
@@ -80,6 +82,19 @@ test("the map details view advertises only actions available for the selected ag
   assert.doesNotMatch(withoutRun, /j join/);
   assert.doesNotMatch(withoutRun, /x cancel agent/);
 
+  ticket.trackerState = "resolved";
+  ticket.trackerStatus = "Done";
+  const resolved = renderCockpit(state, data, theme, 120, 25).join("\n");
+  assert.match(resolved, /resolved in Jira/);
+  assert.doesNotMatch(resolved, /n start agent/);
+
+  ticket.trackerState = "open";
+  ticket.trackerStatus = "Blocked";
+  const blocked = renderCockpit(state, data, theme, 120, 25).join("\n");
+  assert.match(blocked, /blocked in Jira/);
+  assert.doesNotMatch(blocked, /n start agent/);
+
+  ticket.trackerStatus = "To Do";
   data.runs = [{
     id: "sa-local",
     mapId: map.id,
@@ -168,6 +183,78 @@ test("Wayfinder activity sync avoids no-op rewrites under concurrent refreshes",
     );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("process-local subagent ids cannot overwrite runs owned by another Pi", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "wayfinder-runtime-collision-"));
+  try {
+    const moduleUrl = new URL(
+      "../extensions/wayfinder/runtime-state.ts?test=process-id-collision",
+      import.meta.url,
+    ).href;
+    const script = `
+      import { mkdir, readFile, writeFile } from "node:fs/promises";
+      import path from "node:path";
+      const state = await import(${JSON.stringify(moduleUrl)});
+      const target = state.statePath();
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, JSON.stringify({ version: 1, runs: [{
+        id: "sa-1", mapId: "jira:JWB-144", ticketId: "JWB-184",
+        title: "original Wayfinder run", backend: "Pi", profile: "researcher",
+        cwd: ${JSON.stringify(root)}, status: "done", createdAt: 1, updatedAt: 2,
+        ownerPid: process.pid + 1000, finalText: "original JWB finding"
+      }] }));
+      await state.syncRuns([{
+        id: "sa-1", backend: "pi", title: "unrelated local run", prompt: "test",
+        profile: "researcher", origin: "tool", cwd: ${JSON.stringify(root)},
+        status: "done", createdAt: 3, settledAt: 4,
+        meta: { modelLabel: "test-model" }, finalText: "unrelated result"
+      }]);
+      const run = JSON.parse(await readFile(target, "utf8")).runs[0];
+      if (run.finalText !== "original JWB finding") {
+        throw new Error(\`cross-process run was overwritten: \${run.finalText}\`);
+      }
+    `;
+    execFileSync(
+      process.execPath,
+      ["--experimental-strip-types", "--input-type=module", "--eval", script],
+      { env: { ...process.env, PI_AGENT_DIR: root } },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an open Wayfinder cockpit periodically reconciles tracker data", async () => {
+  const data = structuredClone(defaultData) as CockpitData;
+  const settings = defaultWorkspaceSettings(data.routes);
+  settings.trackerId = "jira";
+  let calls = 0;
+  const component = new WayfinderCockpitComponent({
+    tui: { terminal: { rows: 36 }, requestRender() {} } as never,
+    theme,
+    done() {},
+    ctx: { ui: { notify() {} } } as never,
+    data,
+    settings,
+    workspaceKey: process.cwd(),
+    workspaceRoot: process.cwd(),
+    host: undefined,
+    trackerPollIntervalMs: 10,
+    refreshData: async () => {
+      calls += 1;
+      const trackerData = structuredClone(data);
+      trackerData.maps[0]!.title = `Jira refresh ${calls}`;
+      return { trackerData, agentCatalog: data.agentCatalog };
+    },
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    assert.ok(calls >= 2, `expected repeated Jira refreshes, got ${calls}`);
+    assert.match(component.render(120).join("\n"), /Jira refresh [2-9]/);
+  } finally {
+    component.dispose();
   }
 });
 
@@ -284,7 +371,7 @@ test("Jira epics become one map with child work items and blocker state", () => 
           issuelinks: [
             {
               type: { name: "Blocks" },
-              inwardIssue: {
+              outwardIssue: {
                 key: "TEAM-9",
                 fields: {
                   summary: "Choose the migration path",

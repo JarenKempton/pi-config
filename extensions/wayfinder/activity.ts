@@ -104,7 +104,9 @@ export function buildActivityItems(data: CockpitData): ActivityItem[] {
   for (const { map, ticket } of ticketsByKey.values()) {
     const run = latestRunByTicket.get(`${map.id}\0${ticket.id}`);
     items.push({
-      id: run ? `run:${run.id}` : `ticket:${map.id}:${ticket.id}`,
+      id: run
+        ? `run:${run.ownerPid ?? "legacy"}:${run.id}`
+        : `ticket:${map.id}:${ticket.id}`,
       category:
         run && ticket.trackerState !== "resolved"
           ? runCategory(run)
@@ -119,7 +121,7 @@ export function buildActivityItems(data: CockpitData): ActivityItem[] {
   for (const run of unlinkedRuns) {
     const map = mapsById.get(run.mapId) ?? data.maps[0];
     items.push({
-      id: `run:${run.id}`,
+      id: `run:${run.ownerPid ?? "legacy"}:${run.id}`,
       category: runCategory(run),
       map,
       run,

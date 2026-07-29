@@ -23,7 +23,7 @@ Run Pi inside a configured repository or one containing a local Markdown map, th
 - Stale-while-revalidate tracker cache: `~/.pi/agent/wayfinder/cache/`.
 - Repository process heartbeats: `~/.pi/agent/wayfinder/heartbeats/`.
 
-The local files are versioned JSON, written atomically with private permissions, and loaded on every new Pi session. The cockpit opens from cache immediately and refreshes tracker data in the background. Credentials remain in provider CLIs and environment variables.
+The local files are versioned JSON, written atomically with private permissions, and loaded on every new Pi session. The cockpit opens from cache immediately, refreshes tracker data in the background, and reconciles it every 60 seconds while open. Press `r` for an immediate Jira refresh. Credentials remain in provider CLIs and environment variables.
 
 ## Navigation
 
@@ -35,7 +35,7 @@ The local files are versioned JSON, written atomically with private permissions,
 - `n`: start an agent from the selected ticket in either the map details list or ticket view.
 - `j`: jump to or take over the selected ticket's linked agent from either view.
 - `x`: cancel a running linked agent from either view.
-- `r`: retry on-demand comments and dependency hydration from a ticket document.
+- `r`: refresh Jira immediately, or retry on-demand comments and dependency hydration for other trackers.
 
 Context documents scroll with `↑/↓` and `PgUp/PgDn`. Inside settings value editors, `←/→` cycles capability-valid values.
 

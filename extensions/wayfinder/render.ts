@@ -208,16 +208,24 @@ function mapPicker(
   return [...list, "", ...detail.slice(0, 8)];
 }
 
-function agentActionHint(run?: WayfinderRun) {
-  if (!run) return "n start agent";
-  if (run.attached) {
+function agentActionHint(ticket: Ticket, run?: WayfinderRun) {
+  if (run?.attached) {
     return run.status === "running"
       ? "j join agent · x cancel agent"
       : "j reopen agent";
   }
-  return run.status === "running"
-    ? "running in another Pi · takeover unavailable"
-    : "n continue with new agent";
+  if (run?.status === "running") {
+    return "running in another Pi · takeover unavailable";
+  }
+  if (ticket.trackerState === "resolved") return "resolved in Jira";
+  if (ticket.hasChildren) return "execution parent · select a leaf";
+  if (
+    ticket.blockedBy.length > 0 ||
+    /blocked|impediment|waiting/i.test(ticket.trackerStatus ?? "")
+  ) {
+    return "blocked in Jira";
+  }
+  return run ? "n continue with new agent" : "n start agent";
 }
 
 function compactTicketDetail(
@@ -280,7 +288,7 @@ function compactTicketDetail(
   } else {
     lines.push(
       "",
-      theme.fg("dim", agentActionHint(run)),
+      theme.fg("dim", agentActionHint(ticket, run)),
     );
   }
   return lines;
@@ -1145,17 +1153,17 @@ function footer(state: CockpitState, data: CockpitData) {
   if (state.confirmStart) {
     return `Start ${state.confirmStart.ticketId}? · y/enter confirm · esc cancel`;
   }
-  if (state.screen === "maps") return "↑↓ select · enter open · g agents · s settings · q close";
+  if (state.screen === "maps") return "↑↓ select · enter open · r refresh · g agents · s settings · q close";
   if (state.screen === "map" || state.screen === "ticket") {
     const map = selectedMap(state, data);
     const ticket = selectedTicket(state, data);
     const run = data.runs?.find(
       (candidate) => candidate.mapId === map.id && candidate.ticketId === ticket.id,
     );
-    const action = agentActionHint(run);
+    const action = agentActionHint(ticket, run);
     return state.screen === "map"
-      ? `↑↓ select · ${action} · enter ticket · c context · g agents · esc back`
-      : `r details · ${action} · g agents · ↑↓ scroll · esc back`;
+      ? `↑↓ select · ${action} · r refresh · enter ticket · c context · g agents · esc back`
+      : `r refresh/details · ${action} · g agents · ↑↓ scroll · esc back`;
   }
   if (state.screen === "map-context") return "↑↓/PgUp/PgDn scroll · esc back · q close";
   if (state.screen === "attention") return "↑↓ select · a accept · f Fog · d dismiss · esc back · q close";

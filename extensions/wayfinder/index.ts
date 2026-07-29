@@ -87,6 +87,7 @@ function snapshotRun(snapshot: SubagentSnapshot): WayfinderRun {
     cwd: snapshot.cwd,
     status: snapshot.status,
     attached: true,
+    ownerPid: process.pid,
     createdAt: snapshot.createdAt,
     updatedAt: snapshot.settledAt ?? Date.now(),
     sessionFilePath: snapshot.meta.sessionFilePath,
@@ -107,7 +108,9 @@ export class WayfinderCockpitComponent {
   private data: CockpitData;
   private settings: WorkspaceSettings;
   private unsubscribe?: () => void;
-  private pollTimer?: NodeJS.Timeout;
+  private agentPollTimer?: NodeJS.Timeout;
+  private trackerPollTimer?: NodeJS.Timeout;
+  private trackerRefreshInFlight?: Promise<void>;
   private refreshLoader?: (trackerId: string) => Promise<{
     trackerData: CockpitData;
     agentCatalog: CockpitData["agentCatalog"];
@@ -125,6 +128,7 @@ export class WayfinderCockpitComponent {
     workspaceRoot: string;
     host: SubagentHostBridge | undefined;
     initialScreen?: "maps" | "agents";
+    trackerPollIntervalMs?: number;
     refreshData?: (trackerId: string) => Promise<{
       trackerData: CockpitData;
       agentCatalog: CockpitData["agentCatalog"];
@@ -144,12 +148,38 @@ export class WayfinderCockpitComponent {
       screen: options.initialScreen ?? "maps",
     };
     void this.connectAgentUpdates();
-    this.pollTimer = setInterval(() => {
+    this.agentPollTimer = setInterval(() => {
       void this.refreshPersistedRuns();
     }, 1_500);
-    this.pollTimer.unref();
+    this.agentPollTimer.unref();
     this.refreshLoader = options.refreshData;
-    if (this.refreshLoader) void this.refreshData(this.refreshLoader);
+    if (this.refreshLoader) {
+      void this.requestTrackerRefresh();
+      const interval = options.trackerPollIntervalMs ?? 60_000;
+      if (interval > 0) {
+        this.trackerPollTimer = setInterval(() => {
+          void this.requestTrackerRefresh();
+        }, interval);
+        this.trackerPollTimer.unref();
+      }
+    }
+  }
+
+  private requestTrackerRefresh() {
+    if (this.disposed || !this.refreshLoader) return Promise.resolve();
+    if (this.trackerRefreshInFlight) return this.trackerRefreshInFlight;
+    this.data.trackerRefresh = {
+      state: "refreshing",
+      updatedAt: this.data.trackerRefresh?.updatedAt,
+    };
+    this.tui.requestRender();
+    const refresh = this.refreshData(this.refreshLoader).finally(() => {
+      if (this.trackerRefreshInFlight === refresh) {
+        this.trackerRefreshInFlight = undefined;
+      }
+    });
+    this.trackerRefreshInFlight = refresh;
+    return refresh;
   }
 
   private async refreshData(
@@ -245,11 +275,19 @@ export class WayfinderCockpitComponent {
       const attachedIds = new Set(snapshots.map((snapshot) => snapshot.id));
       const runs = persistedRuns.map((run) => ({
         ...run,
-        attached: attachedIds.has(run.id),
+        attached: run.ownerPid === process.pid && attachedIds.has(run.id),
       }));
-      const persistedIds = new Set(runs.map((run) => run.id));
+      const locallyPersistedIds = new Set(
+        runs
+          .filter((run) => run.ownerPid === process.pid)
+          .map((run) => run.id),
+      );
       const ephemeral = (this.data.runs ?? [])
-        .filter((run) => run.mapId === "unlinked" && !persistedIds.has(run.id))
+        .filter(
+          (run) =>
+            run.mapId === "unlinked" &&
+            !locallyPersistedIds.has(run.id),
+        )
         .map((run) => ({ ...run, attached: attachedIds.has(run.id) }));
       const merged = [...runs, ...ephemeral];
       const previous = (this.data.runs ?? [])
@@ -293,11 +331,15 @@ export class WayfinderCockpitComponent {
       const attachedIds = new Set(snapshots.map((snapshot) => snapshot.id));
       const linked = (await loadRuns(this.workspaceRoot)).map((run) => ({
         ...run,
-        attached: attachedIds.has(run.id),
+        attached: run.ownerPid === process.pid && attachedIds.has(run.id),
       }));
-      const linkedIds = new Set(linked.map((run) => run.id));
+      const locallyLinkedIds = new Set(
+        linked
+          .filter((run) => run.ownerPid === process.pid)
+          .map((run) => run.id),
+      );
       const unlinked = snapshots
-        .filter((snapshot) => !linkedIds.has(snapshot.id))
+        .filter((snapshot) => !locallyLinkedIds.has(snapshot.id))
         .map(snapshotRun);
       this.data.runs = [...linked, ...unlinked].sort(
         (a, b) => b.updatedAt - a.updatedAt,
@@ -645,7 +687,7 @@ export class WayfinderCockpitComponent {
       this.ctx.ui.notify("No agent session is linked to this selection.", "info");
       return;
     }
-    const live = this.host
+    const live = this.host && run.ownerPid === process.pid
       ? (await this.host.list()).find((snapshot) => snapshot.id === run.id)
       : undefined;
     if (live && this.host) {
@@ -730,6 +772,15 @@ export class WayfinderCockpitComponent {
         void this.cancelSelectedRun();
         return;
       }
+    }
+
+    if (
+      matchesKey(data, "r") &&
+      this.settings.trackerId === "jira" &&
+      ["maps", "map", "ticket", "map-context"].includes(this.state.screen)
+    ) {
+      void this.requestTrackerRefresh();
+      return;
     }
 
     if (this.state.screen === "ticket") {
@@ -862,7 +913,8 @@ export class WayfinderCockpitComponent {
 
   dispose() {
     this.disposed = true;
-    if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.agentPollTimer) clearInterval(this.agentPollTimer);
+    if (this.trackerPollTimer) clearInterval(this.trackerPollTimer);
     this.unsubscribe?.();
   }
 }
