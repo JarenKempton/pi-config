@@ -32,9 +32,11 @@ async function readDocument(): Promise<RuntimeDocument> {
   }
 }
 
-async function withStateLock<T>(operation: () => Promise<T>): Promise<T> {
+let stateQueue: Promise<void> = Promise.resolve();
+
+async function withFileStateLock<T>(operation: () => Promise<T>): Promise<T> {
   await mkdir(STATE_DIRECTORY, { recursive: true, mode: 0o700 });
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 10_000;
   let handle;
   while (!handle) {
     try {
@@ -42,7 +44,7 @@ async function withStateLock<T>(operation: () => Promise<T>): Promise<T> {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       try {
-        if (Date.now() - (await stat(LOCK_PATH)).mtimeMs > 10_000) {
+        if (Date.now() - (await stat(LOCK_PATH)).mtimeMs > 30_000) {
           await rm(LOCK_PATH, { force: true });
           continue;
         }
@@ -61,6 +63,18 @@ async function withStateLock<T>(operation: () => Promise<T>): Promise<T> {
     await handle.close();
     await rm(LOCK_PATH, { force: true });
   }
+}
+
+function withStateLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = stateQueue.then(
+    () => withFileStateLock(operation),
+    () => withFileStateLock(operation),
+  );
+  stateQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 async function writeDocument(document: RuntimeDocument) {
@@ -143,12 +157,25 @@ export async function syncRuns(snapshots: ReadonlyArray<SubagentSnapshot>) {
     for (const snapshot of snapshots) {
       const run = document.runs.find((item) => item.id === snapshot.id);
       if (!run) continue;
-      run.status = snapshot.status;
-      run.updatedAt = snapshot.settledAt ?? Date.now();
-      run.model = snapshot.meta.modelLabel ?? run.model;
-      run.sessionFilePath = snapshot.meta.sessionFilePath ?? run.sessionFilePath;
-      run.nativeSessionId = snapshot.meta.nativeSessionId ?? run.nativeSessionId;
-      run.finalText = snapshot.finalText || run.finalText;
+      const next = {
+        status: snapshot.status,
+        model: snapshot.meta.modelLabel ?? run.model,
+        sessionFilePath: snapshot.meta.sessionFilePath ?? run.sessionFilePath,
+        nativeSessionId: snapshot.meta.nativeSessionId ?? run.nativeSessionId,
+        finalText: snapshot.finalText || run.finalText,
+      };
+      if (
+        run.status === next.status &&
+        run.model === next.model &&
+        run.sessionFilePath === next.sessionFilePath &&
+        run.nativeSessionId === next.nativeSessionId &&
+        run.finalText === next.finalText
+      ) {
+        continue;
+      }
+      Object.assign(run, next, {
+        updatedAt: snapshot.settledAt ?? Date.now(),
+      });
       changed = true;
     }
     if (changed) await writeDocument(document);

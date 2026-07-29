@@ -41,7 +41,7 @@ Context documents scroll with `↑/↓` and `PgUp/PgDn`. Inside settings value e
 
 ## Agent behavior
 
-Starting a leaf ticket shows the resolved runtime/model/effort/profile and working directory, then asks for confirmation. An unclaimed GitHub ticket is claimed before spawn; a Jira To Do leaf moves to In Progress before spawn. If spawning fails, Wayfinder attempts to return that Jira leaf to To Do. Execution parents and native Blocked Jira tickets cannot be started. HITL tickets open takeover immediately; AFK tickets continue in the background and appear in Agent activity.
+Starting a leaf ticket shows an inline confirmation inside the Wayfinder modal. On confirmation, an unclaimed GitHub ticket is claimed before spawn; a Jira To Do leaf moves to In Progress before spawn. If spawning fails, Wayfinder attempts to return that Jira leaf to To Do. Execution parents and native Blocked Jira tickets cannot be started. Started agents remain in the background while the cockpit stays on the current map selection, so several ready leaves can be launched in sequence. Press `j` when you want to join or take over a selected agent.
 
 Active sessions use the shared subagent host. Session identifiers and transcript paths are persisted so settled runs remain visible after restarting Pi. Open cockpits poll repository state, and private process heartbeats distinguish agents owned by a live Pi process from interrupted runs. Active sessions can be taken over by their owning Pi process; spectator processes stay read-only rather than creating concurrent session writers. Archived Pi sessions can be opened directly from the slash-command context. Other archived runtimes expose their transcript path and can be continued from the ticket.
 

@@ -46,6 +46,12 @@ export interface CockpitState {
   deliveryProfileIndex: number;
   deliveryCursor: number;
   scrollOffset: number;
+  confirmStart?: {
+    ticketId: string;
+    target: string;
+    workingDirectory: string;
+    trackerEffect: string;
+  };
   notice?: string;
 }
 
@@ -239,7 +245,11 @@ function moveTicket(
     tickets.findIndex((ticket) => ticket.id === state.selectedTicketId),
   );
   const selected = tickets[move(current, delta, tickets.length)];
-  return { ...state, selectedTicketId: selected?.id ?? state.selectedTicketId };
+  return {
+    ...state,
+    selectedTicketId: selected?.id ?? state.selectedTicketId,
+    confirmStart: undefined,
+  };
 }
 
 const PROFILES: RoutingRule["profile"][] = ["scout", "researcher", "worker"];
@@ -416,6 +426,7 @@ export function reduceCockpit(
         ...clean,
         mapIndex,
         selectedTicketId: map ? ledgerTickets(map)[0]?.id ?? "" : "",
+        confirmStart: undefined,
         deliveryProfileIndex,
       };
     }

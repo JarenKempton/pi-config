@@ -474,7 +474,7 @@ export class WayfinderCockpitComponent {
     void this.hydrateSelectedTicket();
   }
 
-  private async startSelectedTicket() {
+  private async startSelectedTicket(confirmed = false) {
     const map = selectedMap(this.state, this.data);
     const ticket = selectedTicket(this.state, this.data);
     const existing = this.selectedRun();
@@ -534,22 +534,29 @@ export class WayfinderCockpitComponent {
       this.data.agentCatalog,
     );
     const workingDirectory = ticket.workspace?.path ?? this.workspaceRoot;
-    const confirmed = await this.ctx.ui.confirm(
-      `Start ${ticket.mode} agent for ${ticket.id}?`,
-      [
-        ticket.title,
-        `${target.runtime} · ${target.model} · ${target.effort} · ${target.profile}`,
-        `Working directory: ${workingDirectory}`,
-        ticket.trackerState === "open"
-          ? ticket.source?.provider === "github"
-            ? "This will claim the GitHub ticket before the agent starts."
-            : ticket.source?.provider === "jira"
-              ? "After confirmation, Jira will move this leaf ticket to In Progress before the agent starts."
-              : "The canonical tracker remains unchanged; only the local agent association is recorded."
-          : "The ticket is already active or resolved.",
-      ].join("\n"),
-    );
-    if (!confirmed) return;
+    if (!confirmed) {
+      const trackerEffect = ticket.trackerState === "open"
+        ? ticket.source?.provider === "github"
+          ? "Claim the GitHub ticket before spawn"
+          : ticket.source?.provider === "jira"
+            ? "Move the Jira leaf to In Progress before spawn"
+            : "Record only the local agent association"
+        : "Ticket is already active";
+      this.state = {
+        ...this.state,
+        confirmStart: {
+          ticketId: ticket.id,
+          target: `${target.runtime} · ${target.model} · ${target.effort} · ${target.profile}`,
+          workingDirectory,
+          trackerEffect,
+        },
+      };
+      this.tui.requestRender();
+      return;
+    }
+    if (this.state.confirmStart?.ticketId !== ticket.id) return;
+    this.state = { ...this.state, confirmStart: undefined };
+    this.tui.requestRender();
 
     let jiraTransitioned = false;
     let agentStarted = false;
@@ -580,23 +587,14 @@ export class WayfinderCockpitComponent {
         run,
         ...(this.data.runs ?? []).filter((candidate) => candidate.id !== run.id),
       ];
-      const agentIndex = Math.max(
-        0,
-        buildActivityItems(this.data).findIndex(
-          (item) => item.run?.id === run.id,
-        ),
-      );
-      this.state = { ...this.state, screen: "agents", agentIndex };
+      this.state = { ...this.state, confirmStart: undefined };
       this.tui.requestRender();
-      if (ticket.mode === "HITL") {
-        await this.host.takeover(this.ctx, snapshot.id);
-      } else {
-        this.ctx.ui.notify(
-          `Started ${snapshot.id}. Open Agent activity with g.`,
-          "info",
-        );
-      }
+      this.ctx.ui.notify(
+        `Started ${snapshot.id} for ${ticket.id}. Continue selecting tickets, or press j to join this agent.`,
+        "info",
+      );
     } catch (error) {
+      this.state = { ...this.state, confirmStart: undefined };
       if (jiraTransitioned && !agentStarted) {
         try {
           await transitionJiraTicket(this.workspaceRoot, ticket.id, "To Do");
@@ -672,6 +670,18 @@ export class WayfinderCockpitComponent {
   handleInput(data: string) {
     if (matchesKey(data, "ctrl+c") || matchesKey(data, "q")) {
       this.done();
+      return;
+    }
+    if (this.state.confirmStart) {
+      if (matchesKey(data, "y") || matchesKey(data, "enter")) {
+        void this.startSelectedTicket(true);
+        return;
+      }
+      if (matchesKey(data, "escape") || matchesKey(data, "n")) {
+        this.state = { ...this.state, confirmStart: undefined };
+        this.tui.requestRender();
+        return;
+      }
       return;
     }
     if (matchesKey(data, "escape")) {

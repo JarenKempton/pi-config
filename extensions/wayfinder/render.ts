@@ -214,6 +214,7 @@ function compactTicketDetail(
   theme: Theme,
   width: number,
   run?: WayfinderRun,
+  startConfirmation?: CockpitState["confirmStart"],
 ) {
   const lines = [
     section(theme, "SELECTED TICKET"),
@@ -256,15 +257,25 @@ function compactTicketDetail(
       `PR #${ticket.review.number} · ${ticket.review.state} · checks ${ticket.review.checks}`,
     );
   }
-  lines.push(
-    "",
-    theme.fg(
-      "dim",
-      run?.status === "running"
-        ? "j join agent · x cancel agent"
-        : "n start agent",
-    ),
-  );
+  if (startConfirmation) {
+    lines.push(
+      "",
+      theme.fg("warning", `Start ${ticket.id}? y/enter confirm · esc cancel`),
+      theme.fg("dim", startConfirmation.target),
+      theme.fg("dim", startConfirmation.workingDirectory),
+      theme.fg("dim", startConfirmation.trackerEffect),
+    );
+  } else {
+    lines.push(
+      "",
+      theme.fg(
+        "dim",
+        run?.status === "running"
+          ? "j join agent · x cancel agent"
+          : "n start agent",
+      ),
+    );
+  }
   return lines;
 }
 
@@ -395,14 +406,37 @@ function mapBoard(
       ...intro,
       ...columns(
         body,
-        compactTicketDetail(ticket, delivery, theme, Math.floor(width * 0.38), run),
+        compactTicketDetail(
+          ticket,
+          delivery,
+          theme,
+          Math.floor(width * 0.38),
+          run,
+          state.confirmStart?.ticketId === ticket.id
+            ? state.confirmStart
+            : undefined,
+        ),
         width,
         Math.max(48, Math.floor(width * 0.58)),
         theme,
       ),
     ];
   }
-  return [...intro, ...body, "", ...compactTicketDetail(ticket, delivery, theme, width, run).slice(0, 5)];
+  return [
+    ...intro,
+    ...body,
+    "",
+    ...compactTicketDetail(
+      ticket,
+      delivery,
+      theme,
+      width,
+      run,
+      state.confirmStart?.ticketId === ticket.id
+        ? state.confirmStart
+        : undefined,
+    ).slice(0, 10),
+  ];
 }
 
 function inlineMarkdown(value: string) {
@@ -1101,6 +1135,9 @@ function breadcrumbs(state: CockpitState, data: CockpitData) {
 }
 
 function footer(state: CockpitState) {
+  if (state.confirmStart) {
+    return `Start ${state.confirmStart.ticketId}? · y/enter confirm · esc cancel`;
+  }
   if (state.screen === "maps") return "↑↓ select · enter open · g agents · s settings · q close";
   if (state.screen === "map") return "↑↓ select · n start · j join · x cancel · enter ticket · c context · g agents · esc back";
   if (state.screen === "ticket") return "r details · n start · j join · x cancel · g agents · ↑↓ scroll · esc back";

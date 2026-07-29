@@ -69,12 +69,72 @@ test("Wayfinder and subagents share the host bridge across isolated extension mo
   }
 });
 
-test("the map details view advertises direct start and join actions", () => {
+test("the map details view advertises direct start, join, and inline confirmation", () => {
   const data = structuredClone(defaultData);
   const state = reduceCockpit(initialState(data), { type: "enter" }, data);
   const output = renderCockpit(state, data, theme, 120, 25).join("\n");
   assert.match(output, /n start/);
   assert.match(output, /j join/);
+
+  const confirming = renderCockpit(
+    {
+      ...state,
+      confirmStart: {
+        ticketId: state.selectedTicketId,
+        target: "Pi · inherit · medium · researcher",
+        workingDirectory: "/repo",
+        trackerEffect: "Move the Jira leaf to In Progress before spawn",
+      },
+    },
+    data,
+    theme,
+    120,
+    25,
+  ).join("\n");
+  assert.match(confirming, /y\/enter confirm/);
+  assert.match(confirming, /esc cancel/);
+  assert.match(confirming, /Pi · inherit · medium · researcher/);
+  assert.match(confirming, /Move the Jira leaf to In Progress/);
+});
+
+test("Wayfinder activity sync avoids no-op rewrites under concurrent refreshes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "wayfinder-runtime-"));
+  try {
+    const moduleUrl = new URL(
+      "../extensions/wayfinder/runtime-state.ts?test=no-op-sync",
+      import.meta.url,
+    ).href;
+    const script = `
+      import { stat } from "node:fs/promises";
+      const state = await import(${JSON.stringify(moduleUrl)});
+      const snapshot = {
+        id: "sa-test",
+        backend: "pi",
+        title: "test",
+        prompt: "test",
+        profile: "researcher",
+        origin: "wayfinder",
+        cwd: ${JSON.stringify(root)},
+        status: "running",
+        createdAt: 1,
+        meta: { modelLabel: "test-model" },
+        finalText: "",
+      };
+      await state.recordRun("map", "ticket", snapshot);
+      const before = (await stat(state.statePath())).mtimeMs;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await Promise.all(Array.from({ length: 20 }, () => state.syncRuns([snapshot])));
+      const after = (await stat(state.statePath())).mtimeMs;
+      if (before !== after) throw new Error(\`no-op sync rewrote state: \${before} -> \${after}\`);
+    `;
+    execFileSync(
+      process.execPath,
+      ["--experimental-strip-types", "--input-type=module", "--eval", script],
+      { env: { ...process.env, PI_AGENT_DIR: root } },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("map parsing retains custom sections instead of hard-coding the Wayfinder template", () => {
