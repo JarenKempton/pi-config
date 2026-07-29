@@ -96,9 +96,20 @@ export const SUBAGENT_MODAL_OPTIONS = {
   margin: 1,
 } as const;
 
+export const SUBAGENT_TAKEOVER_OPTIONS = {
+  anchor: "center",
+  width: "100%",
+  maxHeight: "100%",
+} as const;
+
 function modalHeight(tui: TUI) {
   const rows = tui.terminal.rows || 30;
   return Math.max(12, Math.min(34, Math.floor(rows * 0.84)));
+}
+
+function takeoverHeight(tui: TUI) {
+  const rows = tui.terminal.rows || 30;
+  return Math.max(12, rows - 1);
 }
 
 export type TakeoverAction = "queue-latest" | "worker-handoff";
@@ -130,7 +141,7 @@ export async function openSubagentTakeover(
       }),
     {
       overlay: true,
-      overlayOptions: SUBAGENT_MODAL_OPTIONS,
+      overlayOptions: SUBAGENT_TAKEOVER_OPTIONS,
     },
   );
 }
@@ -945,8 +956,8 @@ class TakeoverView implements Component, Focusable {
   }
 
   private viewportHeight(): number {
-    // Header, input, hints, and borders consume seven rows inside the modal.
-    return Math.max(6, modalHeight(this.tui) - 7);
+    // Header, input, hints, and borders consume seven rows in the full-screen view.
+    return Math.max(6, takeoverHeight(this.tui) - 7);
   }
 
   render(width: number): string[] {

@@ -4,18 +4,24 @@ import { DEFAULT_SUBAGENT_CONFIG } from "./src/config.ts";
 import {
   reconcileDashboardSelection,
   SUBAGENT_MODAL_OPTIONS,
+  SUBAGENT_TAKEOVER_OPTIONS,
   updateSubagentSetting,
   type DashboardSelection,
 } from "./src/ui/takeover.ts";
 
 
-test("subagent dashboards use a bounded centered modal", () => {
+test("subagent picker stays modal while takeover uses the full terminal", () => {
   assert.deepEqual(SUBAGENT_MODAL_OPTIONS, {
     anchor: "center",
     width: 112,
     minWidth: 58,
     maxHeight: "88%",
     margin: 1,
+  });
+  assert.deepEqual(SUBAGENT_TAKEOVER_OPTIONS, {
+    anchor: "center",
+    width: "100%",
+    maxHeight: "100%",
   });
 });
 
