@@ -32,9 +32,9 @@ The local files are versioned JSON, written atomically with private permissions,
 - `c`: complete map context.
 - `g`: repository activity (ready work, moving agents, input needed, results, failures, and resolved work).
 - `s`: settings.
-- `n`: start an agent from a selected ticket.
-- `j`: jump to or take over the linked agent.
-- `x`: cancel a running linked agent.
+- `n`: start an agent from the selected ticket in either the map details list or ticket view.
+- `j`: jump to or take over the selected ticket's linked agent from either view.
+- `x`: cancel a running linked agent from either view.
 - `r`: retry on-demand comments and dependency hydration from a ticket document.
 
 Context documents scroll with `↑/↓` and `PgUp/PgDn`. Inside settings value editors, `←/→` cycles capability-valid values.

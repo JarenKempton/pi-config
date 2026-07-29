@@ -693,6 +693,21 @@ export class WayfinderCockpitComponent {
       return;
     }
 
+    if (this.state.screen === "map") {
+      if (matchesKey(data, "n")) {
+        void this.startSelectedTicket();
+        return;
+      }
+      if (matchesKey(data, "j")) {
+        void this.jumpToSelectedRun();
+        return;
+      }
+      if (matchesKey(data, "x")) {
+        void this.cancelSelectedRun();
+        return;
+      }
+    }
+
     if (this.state.screen === "ticket") {
       if (matchesKey(data, "r")) {
         void this.hydrateSelectedTicket();

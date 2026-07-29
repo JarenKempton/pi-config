@@ -49,6 +49,34 @@ test("Wayfinder has one canonical command and direct cockpit shortcuts", () => {
   assert.deepEqual(shortcuts, ["alt+w", "alt+a"]);
 });
 
+test("Wayfinder and subagents share the host bridge across isolated extension module loads", async () => {
+  const firstUrl = new URL(
+    "../vendor/davis/extensions/subagents/src/host-bridge.ts?extension=subagents",
+    import.meta.url,
+  );
+  const secondUrl = new URL(
+    "../vendor/davis/extensions/subagents/src/host-bridge.ts?extension=wayfinder",
+    import.meta.url,
+  );
+  const first = await import(firstUrl.href);
+  const second = await import(secondUrl.href);
+  const host = { marker: "shared host" } as never;
+  first.registerSubagentHost(host);
+  try {
+    assert.equal(second.getSubagentHost(), host);
+  } finally {
+    first.registerSubagentHost(undefined);
+  }
+});
+
+test("the map details view advertises direct start and join actions", () => {
+  const data = structuredClone(defaultData);
+  const state = reduceCockpit(initialState(data), { type: "enter" }, data);
+  const output = renderCockpit(state, data, theme, 120, 25).join("\n");
+  assert.match(output, /n start/);
+  assert.match(output, /j join/);
+});
+
 test("map parsing retains custom sections instead of hard-coding the Wayfinder template", () => {
   const sections = parseMarkdownSections(`## Destination\nShip it.\n\n## In-scope molecule set\n- Dialog\n- Drawer\n\n## Recorded external blockers\n- Switch`);
   assert.deepEqual(

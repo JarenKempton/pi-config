@@ -256,6 +256,15 @@ function compactTicketDetail(
       `PR #${ticket.review.number} · ${ticket.review.state} · checks ${ticket.review.checks}`,
     );
   }
+  lines.push(
+    "",
+    theme.fg(
+      "dim",
+      run?.status === "running"
+        ? "j join agent · x cancel agent"
+        : "n start agent",
+    ),
+  );
   return lines;
 }
 
@@ -1093,7 +1102,7 @@ function breadcrumbs(state: CockpitState, data: CockpitData) {
 
 function footer(state: CockpitState) {
   if (state.screen === "maps") return "↑↓ select · enter open · g agents · s settings · q close";
-  if (state.screen === "map") return "↑↓ select · enter ticket · c context · g agents · s settings · esc back";
+  if (state.screen === "map") return "↑↓ select · n start · j join · x cancel · enter ticket · c context · g agents · esc back";
   if (state.screen === "ticket") return "r details · n start · j join · x cancel · g agents · ↑↓ scroll · esc back";
   if (state.screen === "map-context") return "↑↓/PgUp/PgDn scroll · esc back · q close";
   if (state.screen === "attention") return "↑↓ select · a accept · f Fog · d dismiss · esc back · q close";

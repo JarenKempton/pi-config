@@ -27,12 +27,21 @@ export interface SubagentHostBridge {
   abort(id: string): Promise<void>;
 }
 
-let activeHost: SubagentHostBridge | undefined;
+const HOST_REGISTRY = Symbol.for("pi.subagents.host-bridge");
+
+type HostRegistry = typeof globalThis & {
+  [HOST_REGISTRY]?: SubagentHostBridge;
+};
+
+function registry() {
+  return globalThis as HostRegistry;
+}
 
 export function registerSubagentHost(host: SubagentHostBridge | undefined) {
-  activeHost = host;
+  if (host) registry()[HOST_REGISTRY] = host;
+  else delete registry()[HOST_REGISTRY];
 }
 
 export function getSubagentHost() {
-  return activeHost;
+  return registry()[HOST_REGISTRY];
 }
