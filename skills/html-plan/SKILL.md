@@ -122,6 +122,19 @@ After the gate passes and storage is resolved:
 9. If either registry is malformed, duplicated, unsupported, or ambiguous, stop and report it rather than guessing or overwriting it.
 10. Do not implement the plan's product, code changes, migrations, publication, or operational steps. The HTML artifact is a planning deliverable only.
 
+## Visual minimap navigation
+
+Use a minimap only when the document is long enough that section position benefits the reader. Keep it a quiet visual rail rather than a second navigation panel:
+
+- render equal, hairline horizontal marks approximately `1px` high in a very narrow fixed rail;
+- keep inactive marks short and muted; extend only the current section mark modestly and do not add a scrollbar-like progress track;
+- on desktop, allow hover or keyboard focus to reveal the section name and allow click activation to jump to it;
+- on mobile, keep the rail visual-only: remove it from the accessibility tree and tab order, disable pointer interaction, labels, click navigation, dragging, and scrubbing;
+- never enlarge mobile marks into touch handles or let the rail overlap content;
+- hide the minimap in print.
+
+Do not add a minimap to short plans where it would provide no positional value.
+
 ## Charts, diagrams, and graphs
 
 Use visualizations evidence-first, never as decoration. Reserve **chart** for quantitative data, **diagram** for architecture, process, or state, and **graph** for node-edge networks or the mathematical concept.
