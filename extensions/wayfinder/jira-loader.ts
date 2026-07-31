@@ -516,6 +516,28 @@ function descendants(
   return result;
 }
 
+export function mapsFromJiraRoot(
+  root: JiraWorkItem,
+  ordered: JiraWorkItem[],
+  origin?: string,
+): WayfinderMap[] {
+  const epicDescendants = descendants(root.key, ordered);
+  const scopedRoots = epicDescendants.filter(({ issue }) =>
+    issue.fields?.labels?.includes("wayfinder:map"),
+  );
+  if (!scopedRoots.length) {
+    return [mapFromJira(root, epicDescendants, origin)];
+  }
+
+  return scopedRoots.map(({ issue: scopedRoot }) =>
+    mapFromJira(
+      scopedRoot,
+      descendants(scopedRoot.key, epicDescendants.map(({ issue }) => issue)),
+      origin,
+    ),
+  );
+}
+
 export async function loadJiraWayfinderData(
   cwd: string,
   defaults: CockpitData,
@@ -554,8 +576,8 @@ export async function loadJiraWayfinderData(
     const issue = byKey.get(summary.key);
     return issue ? [issue] : [];
   });
-  const maps = roots.map((root) =>
-    mapFromJira(root, descendants(root.key, orderedChildren), origin),
+  const maps = roots.flatMap((root) =>
+    mapsFromJiraRoot(root, orderedChildren, origin),
   );
 
   return {

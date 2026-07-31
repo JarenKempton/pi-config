@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { loadWorkspaceSettings } from "./config.ts";
 import { findTrackerMigration } from "./github-loader.ts";
-import { mapFromJira, transitionJiraTicket, type JiraWorkItem } from "./jira-loader.ts";
+import { mapsFromJiraRoot, mapFromJira, transitionJiraTicket, type JiraWorkItem } from "./jira-loader.ts";
 import { presentationState } from "./state.ts";
 
 function issue(
@@ -96,6 +96,43 @@ test("Jira maps include parent tickets and subtasks with native statuses", () =>
   const blockedTicket = map.tickets.find((ticket) => ticket.id === "JWB-108")!;
   assert.equal(presentationState(blockedTicket), "blocked");
   assert.deepEqual(blockedTicket.blockedBy, ["JWB-999"]);
+});
+
+test("wayfinder map Features become scoped maps inside a durable Jira Epic", () => {
+  const epic = issue("JWB-150", "In Progress");
+  epic.fields!.issuetype = { name: "Epic" };
+  const toolsMap = issue("JWB-215", "To Do", {
+    parent: "JWB-150",
+    labels: ["wayfinder:map", "brain-pipeline-mcp"],
+  });
+  toolsMap.fields!.issuetype = { name: "Feature" };
+  const retrievalMap = issue("JWB-216", "To Do", {
+    parent: "JWB-150",
+    labels: ["wayfinder:map", "brain-retrieval"],
+  });
+  retrievalMap.fields!.issuetype = { name: "Feature" };
+  const toolsLeaf = issue("JWB-217", "To Do", {
+    parent: "JWB-215",
+    labels: ["wayfinder:prototype"],
+    subtask: true,
+  });
+  const retrievalLeaf = issue("JWB-220", "To Do", {
+    parent: "JWB-216",
+    labels: ["wayfinder:research"],
+    subtask: true,
+  });
+
+  const maps = mapsFromJiraRoot(
+    epic,
+    [epic, toolsMap, retrievalMap, toolsLeaf, retrievalLeaf],
+    "https://responsibid.atlassian.net",
+  );
+
+  assert.deepEqual(maps.map((map) => map.id), ["jira:JWB-215", "jira:JWB-216"]);
+  assert.deepEqual(maps[0]!.tickets.map((ticket) => ticket.id), ["JWB-217"]);
+  assert.deepEqual(maps[1]!.tickets.map((ticket) => ticket.id), ["JWB-220"]);
+  assert.equal(maps[0]!.tickets[0]!.hierarchyLevel, 1);
+  assert.equal(maps.flatMap((map) => map.tickets).some((ticket) => ticket.id === "JWB-150"), false);
 });
 
 test("Jira leaf claims use an explicit In Progress transition", async () => {
