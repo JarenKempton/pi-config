@@ -1,11 +1,11 @@
 ---
 name: html-plan
-description: Create a polished, self-contained HTML plan after a rigorous decision interview. Use when the user asks for an HTML plan, visual plan, interactive roadmap, or to be interviewed or grilled before producing one. Also use when the user wants to teach or update preferences for how their HTML plans should work.
+description: Create a strict Markdown plan and compile it into polished, self-contained HTML after a rigorous decision interview. Use when the user asks for an HTML plan, visual plan, interactive roadmap, or to be interviewed or grilled before producing one. Also use when the user wants to teach or update preferences for how compiled plans should work.
 ---
 
 # HTML Plan
 
-Produce an HTML planning artifact only after establishing explicit shared understanding. Keep planning separate from implementing the plan.
+Produce a canonical `.plan.md` planning source and a deterministically compiled HTML artifact only after establishing explicit shared understanding. Keep planning separate from implementing the plan. Models own content and semantic intent; compiler code owns HTML, CSS, SVG, accessibility, responsive behavior, and print.
 
 ## Invocation
 
@@ -19,10 +19,10 @@ Treat command arguments as the initial topic. If no topic is supplied, infer it 
 
 ## Non-negotiable gate
 
-Do not create, regenerate, or modify an HTML plan until the user has both:
+Do not create, regenerate, or modify a canonical plan source or its HTML artifact until the user has both:
 
 1. explicitly confirmed the shared-understanding summary; and
-2. explicitly authorized HTML generation.
+2. explicitly authorized plan generation and rendering.
 
 A request to plan or to start the interview is not generation authorization. Until the gate is passed, inspect, research, interview, and summarize only.
 
@@ -72,13 +72,13 @@ When the decision tree is exhausted, present a concise synthesis containing:
 
 Then ask one final gate question recommending generation, for example:
 
-> Does this accurately capture our shared understanding, and do you authorize me to generate the HTML plan now? Recommended: yes, if the summary is correct; otherwise name the one correction to resolve first.
+> Does this accurately capture our shared understanding, and do you authorize me to generate the canonical plan and render its HTML artifact now? Recommended: yes, if the summary is correct; otherwise name the one correction to resolve first.
 
 Wait. Proceed only after an explicit affirmative that confirms the summary and authorizes generation. If the user corrects anything, update the decision ledger, resolve any reopened branch one question at a time, and repeat the gate.
 
 ## Preference teaching mode
 
-Enter this mode when the user says they want to teach the skill, update its preferences, or change how their HTML plans should work.
+Enter this mode when the user says they want to teach the skill, update its preferences, or change how canonical plans and compiled artifacts should work.
 
 1. Read this canonical file first: `/Users/jaren/.pi/agent/pi-config/skills/html-plan/SKILL.md`.
 2. Inspect existing rules and discoverable examples before asking about preferences.
@@ -88,13 +88,13 @@ Enter this mode when the user says they want to teach the skill, update its pref
 6. Ask one explicit confirmation question and wait.
 7. Only after approval, persist the approved changes to the canonical `SKILL.md`. Do not modify another file unless the user separately approves an adjacent preferences reference.
 
-Never silently rewrite preferences, infer approval from participation, or combine preference persistence with HTML generation authorization. After editing, report exactly what changed.
+Never silently rewrite preferences, infer approval from participation, or combine preference persistence with plan generation and rendering authorization. After editing, report exactly what changed.
 
 ## Choose and remember local storage
 
-New plans remain local until the user separately authorizes publication. Local HTML is canonical regardless of later hosted state.
+New plans remain local until the user separately authorizes publication. Strict `.plan.md` is canonical regardless of later rendering or hosting state; HTML is a reproducible build artifact.
 
-Before generating a project's first HTML plan:
+Before generating a project's first canonical plan:
 
 1. Resolve the project root to its canonical absolute path. Prefer the canonical git root when one exists; otherwise resolve the working directory without symlinks.
 2. Read `/Users/jaren/.pi/agent/plans/.project-preferences.json` as strict JSON and validate schema version `1` before trusting it.
@@ -107,20 +107,20 @@ Before generating a project's first HTML plan:
 
 When the user explicitly requests a destination change, update that one canonical project entry and report the old and new value.
 
-## Generate the artifact
+## Author and compile the artifact
 
 After the gate passes and storage is resolved:
 
-1. Choose a canonical lowercase filename ending in `.html`. For central storage, write `/Users/jaren/.pi/agent/plans/<filename>`; for project-local storage, use the selected project convention.
-2. Create one self-contained `.html` file. Embed CSS and any approved JavaScript. Do not use external runtime dependencies, CDNs, remote fonts, analytics, or remotely hosted assets unless the user approved them.
-3. Apply polished information design rather than a document dump: clear hierarchy, scannable sections, restrained visual system, meaningful status/dependency cues, and useful navigation or interaction where it improves comprehension.
-4. Use accessible semantic HTML, logical heading order, keyboard-operable controls, visible focus states, sufficient contrast, reduced-motion support, responsive layouts, and print styles.
-5. Include the plan's decisions, assumptions, unresolved items, phases, dependencies, risks, success criteria, and next actions. Clearly distinguish facts, decisions, and assumptions.
-6. Add factual citations and links near claims whenever research materially informs the plan.
-7. Set central plan files to mode `0600`. Project-local files follow repository policy unless it is less restrictive for sensitive content.
-8. Register every central plan in `/Users/jaren/.pi/agent/plans/.registry.json` using schema version `1`, an opaque stable `pln_` ID, title, filename, canonical file path, canonical source-project path, and timestamps. Preserve the plan ID across edits. Require unique IDs and canonical paths, validate before writing, and update atomically with mode `0600`.
-9. If either registry is malformed, duplicated, unsupported, or ambiguous, stop and report it rather than guessing or overwriting it.
-10. Do not implement the plan's product, code changes, migrations, publication, or operational steps. The HTML artifact is a planning deliverable only.
+1. Choose one canonical lowercase basename. Write `<basename>.plan.md` as source and derive `<basename>.html` beside it. For central storage, use `/Users/jaren/.pi/agent/plans/`; for project-local storage, use the selected project convention.
+2. Author only the supported contract: required YAML frontmatter, safe CommonMark/GFM, typed `plan:` fences, and approved `:::` directives. Do not write raw HTML, CSS, SVG, scripts, unknown directives, or remote runtime assets.
+3. Express semantic intent rather than presentation instructions. Include the plan's decisions, assumptions, unresolved items, phases, dependencies, risks, success criteria, next actions, and factual citations near materially researched claims.
+4. Format and lint the source, resolve all blocking diagnostics, freeze the resolved configuration in a render lock, and invoke the deterministic renderer. Never handcraft or patch the generated HTML to bypass compiler behavior.
+5. The renderer must produce one self-contained HTML file with no CDNs, remote fonts, analytics, chart runtimes, or runtime network dependencies. Deterministic code owns hierarchy, components, CSS, inline SVG, syntax highlighting, navigation, accessibility, responsive behavior, and print.
+6. If the compiler or an approved component is unavailable, preserve the valid `.plan.md` source and report rendering as blocked. Do not fall back to arbitrary model-authored HTML.
+7. Set central source, lock, artifact, registry, and metadata files to mode `0600`. Project-local files follow repository policy unless it is less restrictive for sensitive content.
+8. Register every central plan using its stable opaque `pln_` ID and canonical project path. Preserve identity across source edits and artifact rebuilds; update registries atomically and reject malformed, duplicate, unsupported, or ambiguous state rather than guessing.
+9. Treat hosting as a separate adapter operation. Local, Tailscale, Cloudflare, or future host selection never changes canonical source or rendered bytes. Every host mutation requires discover → proposal → explicit confirmation → apply → read-back verification.
+10. Do not implement the plan's product, code changes, migrations, publication, or operational steps. The canonical source and compiled HTML are planning deliverables only.
 
 ## Visual minimap navigation
 
@@ -165,10 +165,10 @@ Apply these integrity and implementation rules:
 
 ## Verify and iterate
 
-After writing:
+After authoring:
 
-1. Inspect the generated file directly for completeness, malformed markup, broken internal links, accidental external dependencies, and consistency with the confirmed decisions.
+1. Validate the `.plan.md` source, formatter idempotency, render lock, diagnostics, and artifact digest. Inspect generated HTML for malformed markup, broken links, accidental external dependencies, and consistency with the confirmed decisions.
 2. Automatically call `browser_qa` against the local HTML file in the user's existing visible browser. Give it a standalone task naming the file, allowing only read-only visual inspection and normal viewport/print-preview checks, prohibiting unrelated or consequential actions, and requiring screenshot evidence.
-3. Check desktop and narrow responsive layouts, overflow, typography, contrast, navigation/interactions, and print presentation.
-4. Inspect the report and screenshots. If defects are found, fix only the HTML artifact and repeat visual QA until no material visual defect remains.
-5. Report the artifact path, what was verified, any remaining limitations, and explicitly note that the plan itself was not implemented.
+3. Check desktop and narrow responsive layouts, overflow, typography, contrast, navigation/interactions, accessibility, and print presentation.
+4. Inspect the report and screenshots. If defects are found, change canonical Markdown when content or semantic intent is wrong; change compiler/theme code when presentation is wrong. Re-render and repeat QA until no material defect remains. Never patch generated HTML directly.
+5. Report both source and artifact paths, compiler/theme versions or render lock, what was verified, any remaining limitations, and explicitly note that the plan itself was not implemented.
