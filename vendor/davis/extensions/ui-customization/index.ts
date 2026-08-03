@@ -220,9 +220,9 @@ function formatQuotaLines(
       if (stale) return `${period} ${percent}`;
       const reset = theme.fg(
         "dim",
-        `resets in ${formatQuotaCountdown(window.resetsAt, now)}`,
+        `(${formatQuotaCountdown(window.resetsAt, now)})`,
       );
-      return `${period} ${percent}, ${reset}`;
+      return `${period} ${percent} ${reset}`;
     });
     const state = stale ? ` · ${theme.fg("dim", "stale")}` : "";
     return [`${label}${state} · ${values.join(" · ")}`];
