@@ -194,41 +194,39 @@ function quotaColor(usedPercent: number) {
   return "success";
 }
 
-function formatQuotaWindows(
+function formatQuotaLines(
   windows: DashboardQuotaWindow[],
   theme: Theme,
   now = Date.now(),
 ) {
   const selected = selectFooterQuotaWindows(windows, now);
   const providers = ["Codex", "Claude"] as const;
-  return providers
-    .flatMap((provider) => {
-      const providerWindows = selected.filter(
-        (window) => window.provider === provider,
+  return providers.flatMap((provider) => {
+    const providerWindows = selected.filter(
+      (window) => window.provider === provider,
+    );
+    if (!providerWindows.length) return [];
+    const label = theme.fg(
+      provider === "Codex" ? "success" : "warning",
+      provider,
+    );
+    const stale = providerWindows.every((window) => window.stale);
+    const values = providerWindows.map((window) => {
+      const period = theme.fg("muted", quotaPeriod(window));
+      const percent = theme.fg(
+        quotaColor(window.usedPercent),
+        `${Math.round(window.usedPercent)}%`,
       );
-      if (!providerWindows.length) return [];
-      const label = theme.fg(
-        provider === "Codex" ? "success" : "warning",
-        provider,
+      if (stale) return `${period} ${percent}`;
+      const reset = theme.fg(
+        "dim",
+        `resets in ${formatQuotaCountdown(window.resetsAt, now)}`,
       );
-      const stale = providerWindows.every((window) => window.stale);
-      const values = providerWindows.map((window) => {
-        const period = theme.fg("muted", quotaPeriod(window));
-        const percent = theme.fg(
-          stale ? "muted" : quotaColor(window.usedPercent),
-          `${Math.round(window.usedPercent)}%`,
-        );
-        if (stale) return `${period} ${percent}`;
-        const reset = theme.fg(
-          "dim",
-          `resets in ${formatQuotaCountdown(window.resetsAt, now)}`,
-        );
-        return `${period} ${percent}, ${reset}`;
-      });
-      const state = stale ? ` · ${theme.fg("dim", "stale")}` : "";
-      return [`${label}${state} · ${values.join(" · ")}`];
-    })
-    .join("   ");
+      return `${period} ${percent}, ${reset}`;
+    });
+    const state = stale ? ` · ${theme.fg("dim", "stale")}` : "";
+    return [`${label}${state} · ${values.join(" · ")}`];
+  });
 }
 
 function center(text: string, width: number) {
@@ -254,6 +252,11 @@ function columns(left: string, right: string, width: number) {
     `${fittedLeft}${" ".repeat(gap)}${fittedRight}`,
     width,
   );
+}
+
+function alignRight(value: string, width: number) {
+  const fitted = truncateToWidth(value, width);
+  return `${" ".repeat(Math.max(0, width - visibleWidth(fitted)))}${fitted}`;
 }
 
 export default function uiCustomization(pi: ExtensionAPI) {
@@ -337,31 +340,44 @@ export default function uiCustomization(pi: ExtensionAPI) {
 
           const contextPercent =
             modelInfo.contextPercent === null
-              ? "?"
-              : `${Math.round(modelInfo.contextPercent)}`;
+              ? theme.fg("muted", "?%")
+              : theme.fg(
+                  quotaColor(modelInfo.contextPercent),
+                  `${Math.round(modelInfo.contextPercent)}%`,
+                );
           const usageParts = [
-            `ctx ${contextPercent}%`,
-            `chat ${formatMoney(modelInfo.cost)}`,
+            `${theme.fg("muted", "ctx")} ${contextPercent}`,
+            theme.fg("muted", `chat ${formatMoney(modelInfo.cost)}`),
           ];
           if (subagentInfo.count > 0) {
             usageParts.push(
-              `agents ${subagentInfo.costKnown ? "" : "≥"}${formatMoney(subagentInfo.costUsd)}`,
+              theme.fg(
+                "muted",
+                `agents ${subagentInfo.costKnown ? "" : "≥"}${formatMoney(subagentInfo.costUsd)}`,
+              ),
             );
           }
           if (accountingInfo.todayCost !== null) {
             usageParts.push(
-              `today ${accountingInfo.todayRateKnown ? "" : "≥"}${formatMoney(accountingInfo.todayCost)}`,
+              theme.fg(
+                "muted",
+                `today ${accountingInfo.todayRateKnown ? "" : "≥"}${formatMoney(accountingInfo.todayCost)}`,
+              ),
             );
           }
-          const usage = usageParts.join(" · ");
-          const quotas = formatQuotaWindows(accountingInfo.quotaWindows, theme);
+          const usage = usageParts.join(theme.fg("dim", " · "));
+          const quotaLines = formatQuotaLines(
+            accountingInfo.quotaWindows,
+            theme,
+          );
           const model = modelInfo.thinking === "off"
             ? modelInfo.modelId
             : `${modelInfo.modelId} · ${modelInfo.thinking}`;
 
           const lines = [
             columns(location, theme.fg("muted", model), width),
-            columns(theme.fg("muted", usage), quotas, width),
+            columns(usage, quotaLines[0] ?? "", width),
+            ...quotaLines.slice(1).map((line) => alignRight(line, width)),
           ];
 
           // Extension statuses render after the dashboard lines, one per row.

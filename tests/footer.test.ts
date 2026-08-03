@@ -177,13 +177,13 @@ test("footer renders the compact repository and usage rows", async () => {
     { getExtensionStatuses: () => new Map() },
   );
   const lines = footer.render(160);
-  assert.equal(lines.length, 2);
+  assert.equal(lines.length, 3);
   assert.match(lines[0], /\/tmp\/project · main · 3 changed/);
   assert.match(lines[0], /gpt-5\.6-sol · high/);
   assert.match(lines[1], /ctx 5% · chat \$1\.24 · today \$12\.35/);
   assert.match(lines[1], /Codex · week 25%, resets in/);
-  assert.match(lines[1], /Claude · 5h 25%, resets in/);
-  assert.doesNotMatch(lines[1], /[✦◎~↻]/);
+  assert.match(lines[2], /Claude · 5h 25%, resets in/);
+  assert.doesNotMatch(lines.join("\n"), /[✦◎~↻]/);
   assert.equal(lines.every((line: string) => visibleWidth(line) <= 160), true);
 
   const staleFiveHour = quota("Claude", "five-hour", 300);
