@@ -114,6 +114,11 @@ function providerLines(
     lines.push(`  ${theme.fg("error", provider.error)}`);
     return lines;
   }
+  if (provider.refreshError) {
+    lines.push(
+      `  ${theme.fg("warning", `Live refresh failed; showing cache: ${provider.refreshError}`)}`,
+    );
+  }
   if (!provider.windows.length) {
     lines.push(`  ${theme.fg("muted", "No quota windows reported")}`);
     return lines;
@@ -261,8 +266,10 @@ class UsageOverlayComponent {
 
 export async function showUsageOverlay(ctx: ExtensionContext) {
   if (overlayOpen) return;
+  const loadLiveUsage = () =>
+    collectUsageStatus(Date.now(), { refreshClaude: true });
   if (ctx.mode !== "tui") {
-    const report = await collectUsageStatus();
+    const report = await loadLiveUsage();
     const windows = [...report.codex.windows, ...report.claude.windows];
     ctx.ui.notify(
       windows
@@ -280,7 +287,7 @@ export async function showUsageOverlay(ctx: ExtensionContext) {
   try {
     await ctx.ui.custom<void>(
       (tui, theme, _keybindings, done) =>
-        new UsageOverlayComponent(tui, theme, done, collectUsageStatus),
+        new UsageOverlayComponent(tui, theme, done, loadLiveUsage),
       {
         overlay: true,
         overlayOptions: {

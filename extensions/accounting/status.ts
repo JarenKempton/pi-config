@@ -1,14 +1,13 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { resolveCursorBinary } from "../../vendor/davis/extensions/subagents/src/backends/cursor.ts";
+import {
+  CLAUDE_CACHE_PATH,
+  refreshClaudeUsageLive,
+} from "./claude-usage.ts";
 
-export const CLAUDE_CACHE_PATH = join(
-  homedir(),
-  ".pi/agent/private/claude-rate-limits.json",
-);
+export { CLAUDE_CACHE_PATH } from "./claude-usage.ts";
 
 export interface ClaudeCacheStatus {
   path: string;
@@ -37,6 +36,7 @@ export interface UsageProviderStatus {
   stale: boolean;
   windows: UsageWindow[];
   error?: string;
+  refreshError?: string;
 }
 
 export interface UsageStatusReport {
@@ -330,12 +330,18 @@ export async function readCursorAccountStatus(
 
 export async function collectUsageStatus(
   now = Date.now(),
+  options: { refreshClaude?: boolean } = {},
 ): Promise<UsageStatusReport> {
-  const [codexResult, claudeCache, cursor] = await Promise.all([
+  const [codexResult, claudeRefresh, cursor] = await Promise.all([
     readCodexRateLimits(),
-    readClaudeCache(now),
+    options.refreshClaude
+      ? refreshClaudeUsageLive()
+      : Promise.resolve(undefined),
     readCursorAccountStatus(),
   ]);
+  const claudeCache = await readClaudeCache(
+    options.refreshClaude ? Date.now() : now,
+  );
   const codex: UsageProviderStatus = codexResult.ok
     ? {
         id: "codex",
@@ -357,12 +363,18 @@ export async function collectUsageStatus(
   const claude: UsageProviderStatus = {
     id: "claude",
     label: "Claude",
-    source: "local status-line cache",
+    source: claudeRefresh?.ok
+      ? "live account limits"
+      : "local usage cache",
     observedAt: claudeCache.observedAt,
     ageMs: claudeCache.ageMs,
     stale: claudeCache.stale,
     windows: parseClaudeUsageWindows(claudeCache.rateLimits),
     error: claudeCache.error,
+    refreshError:
+      claudeRefresh && !claudeRefresh.ok
+        ? claudeRefresh.error
+        : undefined,
   };
   return {
     generatedAt: new Date(now).toISOString(),
@@ -420,7 +432,7 @@ export async function renderUsageStatus(): Promise<string> {
       ...report.codex.windows.map((window) => `- ${summarizeWindow(window)}`),
     );
   }
-  lines.push("", "Claude status-line cache");
+  lines.push("", "Claude usage cache");
   lines.push(
     `- Status: ${report.claude.stale ? "stale" : "fresh"}${
       report.claude.observedAt
@@ -429,6 +441,9 @@ export async function renderUsageStatus(): Promise<string> {
     }`,
   );
   if (report.claude.error) lines.push(`- Note: ${report.claude.error}`);
+  if (report.claude.refreshError) {
+    lines.push(`- Live refresh failed: ${report.claude.refreshError}`);
+  }
   lines.push(
     ...report.claude.windows.map((window) => `- ${summarizeWindow(window)}`),
     "",

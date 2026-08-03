@@ -34,6 +34,7 @@ import type {
 } from "../domain.ts";
 import { SendError, SpawnError } from "../domain.ts";
 import { claudeOptionsForProfile } from "../permissions.ts";
+import { refreshClaudeUsageFromQuery } from "../../../../../../extensions/accounting/claude-usage.ts";
 
 const CLAUDE_CONTEXT_WINDOW = 200_000;
 const INTERRUPT_TIMEOUT_MS = 2_000;
@@ -467,6 +468,11 @@ const makeClaudeSession = (
     };
 
     const handleResult = (result: SDKResultMessage) => {
+      // Refresh subscription windows through this already-authenticated SDK
+      // session. This control request has no model cost; failures retain the
+      // previous atomic cache for the footer and /usage overlay.
+      void refreshClaudeUsageFromQuery(nativeQuery);
+
       // result.usage is a whole-run aggregate, not occupancy (see
       // contextOccupancyTokens); only the capacity is trustworthy here. The
       // occupancy itself was already emitted by the last assistant message.
