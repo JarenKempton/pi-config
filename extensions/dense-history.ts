@@ -123,30 +123,44 @@ function summarizeResult(result: ToolResult | undefined) {
   return `${lines} ${lines === 1 ? "line" : "lines"}`;
 }
 
+function compactToolLabel(toolName: string) {
+  return toolName === "bash" ? "$" : toolName;
+}
+
+function compactKey(key: string) {
+  const control = key.match(/^ctrl\+(.+)$/i);
+  return control ? `⌃${control[1]!.toUpperCase()}` : key;
+}
+
 export function renderCompactToolLine(
   instance: ToolExecutionInstance,
   theme: Theme,
   expandKey: string,
   width: number,
 ) {
-  const title = theme.fg("toolTitle", instance.toolName);
-  const outcomeText = summarizeResult(instance.result);
-  const outcome = theme.fg(
-    instance.result?.isError ? "error" : "muted",
-    outcomeText,
-  );
-  const prefix = `${theme.fg("dim", "↳ ")}${title}${theme.fg("dim", " · ")}${outcome}`;
-  const suffix = theme.fg("dim", ` · ${expandKey} expand`);
+  const label = theme.fg("toolTitle", compactToolLabel(instance.toolName));
   const description = describeTool(instance);
-  if (!description) return [truncateToWidth(`${prefix}${suffix}`, width)];
-
-  const separator = theme.fg("dim", " · ");
-  const available = Math.max(
-    1,
-    width - visibleWidth(prefix) - visibleWidth(separator) - visibleWidth(suffix),
+  const left = description
+    ? `${label}  ${theme.fg("muted", description)}`
+    : label;
+  const outcome = theme.fg(
+    instance.result?.isError ? "error" : "dim",
+    summarizeResult(instance.result),
   );
-  const detail = theme.fg("muted", truncateToWidth(description, available, "…"));
-  return [truncateToWidth(`${prefix}${separator}${detail}${suffix}`, width)];
+  const key = theme.fg("dim", compactKey(expandKey));
+  const right = `${outcome}  ${key}`;
+  const gap = width - visibleWidth(left) - visibleWidth(right);
+  if (gap >= 2) return [`${left}${" ".repeat(gap)}${right}`];
+
+  const leftWidth = Math.max(1, width - visibleWidth(right) - 2);
+  const fittedLeft = truncateToWidth(left, leftWidth, "…");
+  const fittedGap = Math.max(
+    1,
+    width - visibleWidth(fittedLeft) - visibleWidth(right),
+  );
+  return [
+    truncateToWidth(`${fittedLeft}${" ".repeat(fittedGap)}${right}`, width),
+  ];
 }
 
 export function installDenseHistoryPatch(host: HostPiModule): DenseHistoryState {

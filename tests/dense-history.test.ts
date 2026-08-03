@@ -32,8 +32,8 @@ test("settled tool summaries preserve useful context in one line", () => {
     80,
   );
 
-  assert.equal(line, "↳ bash · 3 lines · npm test · ctrl+o expand");
-  assert.equal(visibleWidth(line), line.length);
+  assert.match(line, /^\$  npm test\s+3 lines  ⌃O$/);
+  assert.equal(visibleWidth(line), 80);
 });
 
 test("dense history keeps live tools detailed and collapses settled tools", () => {
@@ -82,7 +82,10 @@ test("dense history keeps live tools detailed and collapses settled tools", () =
     { content: [{ type: "text", text: "passed" }], isError: false },
     false,
   );
-  assert.match(historical.render(80)[0] ?? "", /^↳ bash · 1 line/);
+  assert.match(
+    historical.render(80)[0] ?? "",
+    /^\$  npm test\s+1 line  ⌃O$/,
+  );
   historical.expanded = true;
   assert.deepEqual(historical.render(80), ["FULL TOOL"]);
 
@@ -95,7 +98,7 @@ test("dense history keeps live tools detailed and collapses settled tools", () =
   assert.deepEqual(live.render(80), ["FULL TOOL"]);
   state.activeTurn = false;
   state.touchedTools.clear();
-  assert.match(live.render(80)[0] ?? "", /^↳ bash · 1 line/);
+  assert.match(live.render(80)[0] ?? "", /^\$  npm test\s+1 line  ⌃O$/);
 });
 
 test("settled tool summaries stay bounded and expose errors", () => {
@@ -119,7 +122,7 @@ test("settled tool summaries stay bounded and expose errors", () => {
     48,
   );
 
-  assert.match(line, /^↳ read · error · /);
-  assert.match(line, /ctrl\+o expand$/);
+  assert.match(line, /^read  /);
+  assert.match(line, /error  ⌃O$/);
   assert.equal(visibleWidth(line) <= 48, true);
 });
