@@ -1,42 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   installDenseHistoryPatch,
-  renderCompactToolLine,
+  registerDenseHistoryEvents,
 } from "../extensions/dense-history.ts";
 
 const theme = {
   fg: (_color: string, text: string) => text,
 } as Theme;
 
-test("settled tool summaries preserve useful context in one line", () => {
-  const [line] = renderCompactToolLine(
-    {
-      toolName: "bash",
-      args: { command: "npm\ntest" },
-      expanded: false,
-      isPartial: false,
-      result: {
-        isError: false,
-        content: [{ type: "text", text: "one\ntwo\nthree" }],
-      },
-      updateResult() {},
-      render() {
-        return [];
-      },
-    },
-    theme,
-    "ctrl+o",
-    80,
-  );
-
-  assert.match(line, /^\$  npm test\s+3 lines  ⌃O$/);
-  assert.equal(visibleWidth(line), 80);
-});
-
-test("dense history keeps live tools detailed and collapses settled tools", () => {
+test("dense history keeps active tools detailed and hides settled tools", () => {
   class FakeAssistant {
     hideThinkingBlock = true;
     setHideThinkingBlock(hidden: boolean) {
@@ -52,8 +26,6 @@ test("dense history keeps live tools detailed and collapses settled tools", () =
     }
   }
   class FakeTool {
-    toolName = "bash";
-    args = { command: "npm test" };
     expanded = false;
     isPartial = true;
     result?: {
@@ -82,10 +54,7 @@ test("dense history keeps live tools detailed and collapses settled tools", () =
     { content: [{ type: "text", text: "passed" }], isError: false },
     false,
   );
-  assert.match(
-    historical.render(80)[0] ?? "",
-    /^\$  npm test\s+1 line  ⌃O$/,
-  );
+  assert.deepEqual(historical.render(80), []);
   historical.expanded = true;
   assert.deepEqual(historical.render(80), ["FULL TOOL"]);
 
@@ -96,33 +65,65 @@ test("dense history keeps live tools detailed and collapses settled tools", () =
     false,
   );
   assert.deepEqual(live.render(80), ["FULL TOOL"]);
+
+  // Internal model/tool turns do not clear touchedTools. Only agent_settled does.
+  assert.deepEqual(live.render(80), ["FULL TOOL"]);
   state.activeTurn = false;
   state.touchedTools.clear();
-  assert.match(live.render(80)[0] ?? "", /^\$  npm test\s+1 line  ⌃O$/);
+  assert.deepEqual(live.render(80), []);
+
+  live.expanded = true;
+  assert.deepEqual(live.render(80), ["FULL TOOL"]);
 });
 
-test("settled tool summaries stay bounded and expose errors", () => {
-  const [line] = renderCompactToolLine(
-    {
-      toolName: "read",
-      args: { path: `/tmp/${"nested/".repeat(30)}file.ts` },
-      expanded: false,
-      isPartial: false,
-      result: {
-        isError: true,
-        content: [{ type: "text", text: "permission denied" }],
-      },
-      updateResult() {},
-      render() {
-        return [];
-      },
+test("dense history collapses at agent settlement, not internal turn boundaries", async () => {
+  const handlers = new Map<string, (event: unknown, ctx: any) => unknown>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: any) => unknown) {
+      handlers.set(name, handler);
     },
+  };
+  let hidden = false;
+  const thinking = {
+    hideThinkingBlock: false,
+    setHideThinkingBlock(value: boolean) {
+      hidden = value;
+    },
+    updateContent() {},
+  };
+  const tool = {};
+  const state = {
+    activeTurn: false,
     theme,
-    "ctrl+o",
-    48,
-  );
+    touchedThinking: new Set<any>(),
+    touchedTools: new Set<any>(),
+  };
+  registerDenseHistoryEvents(pi as any, state as any);
 
-  assert.match(line, /^read  /);
-  assert.match(line, /error  ⌃O$/);
-  assert.equal(visibleWidth(line) <= 48, true);
+  assert.equal(handlers.has("turn_end"), false);
+  assert.equal(handlers.has("agent_start"), true);
+  assert.equal(handlers.has("agent_settled"), true);
+
+  const ctx = {
+    mode: "tui",
+    ui: {
+      theme,
+      setHiddenThinkingLabel() {},
+    },
+  };
+  await handlers.get("agent_start")?.({}, ctx);
+  assert.equal(state.activeTurn, true);
+  state.touchedThinking.add(thinking);
+  state.touchedTools.add(tool);
+
+  // A subsequent low-level start in the same response must preserve history.
+  await handlers.get("agent_start")?.({}, ctx);
+  assert.equal(state.touchedThinking.size, 1);
+  assert.equal(state.touchedTools.size, 1);
+
+  await handlers.get("agent_settled")?.({}, ctx);
+  assert.equal(state.activeTurn, false);
+  assert.equal(hidden, true);
+  assert.equal(state.touchedThinking.size, 0);
+  assert.equal(state.touchedTools.size, 0);
 });

@@ -2,7 +2,7 @@ import type {
   ExtensionAPI,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -25,8 +25,6 @@ type ToolResult = {
 };
 
 type ToolExecutionInstance = {
-  toolName: string;
-  args: Record<string, unknown>;
   expanded: boolean;
   isPartial: boolean;
   result?: ToolResult;
@@ -55,7 +53,7 @@ type DenseHistoryState = {
 };
 
 const PATCH_KEY = Symbol.for("jaren.pi.dense-history.patch");
-const TOOL_PATCH_KEY = Symbol.for("jaren.pi.dense-history.tool-patch");
+const TOOL_PATCH_KEY = Symbol.for("jaren.pi.dense-history.tool-patch.v2");
 
 async function loadHostPiModule(): Promise<HostPiModule> {
   // Pi packages may carry a peer dependency copy that differs from the CLI's
@@ -71,96 +69,6 @@ async function loadHostPiModule(): Promise<HostPiModule> {
     resolve(dirname(resolvedCliPath), "index.js"),
   ).href;
   return (await import(hostIndexUrl)) as HostPiModule;
-}
-
-function inlineText(value: unknown) {
-  return String(value ?? "")
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function firstString(args: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = args[key];
-    if (typeof value === "string" && value.trim()) return inlineText(value);
-  }
-  return "";
-}
-
-function describeTool(instance: ToolExecutionInstance) {
-  const { args, toolName } = instance;
-  if (toolName === "bash") return firstString(args, ["command"]);
-  if (toolName === "grep") {
-    const pattern = firstString(args, ["pattern", "query"]);
-    const path = firstString(args, ["path"]);
-    return [pattern, path].filter(Boolean).join(" · ");
-  }
-  if (toolName === "subagent_spawn") {
-    return firstString(args, ["name", "model", "harness"]);
-  }
-  return firstString(args, [
-    "path",
-    "url",
-    "query",
-    "name",
-    "id",
-    "task",
-    "question",
-  ]);
-}
-
-function summarizeResult(result: ToolResult | undefined) {
-  if (!result) return "done";
-  if (result.isError) return "error";
-  const output = result.content
-    .filter((item) => item.type === "text" && item.text)
-    .map((item) => item.text)
-    .join("\n")
-    .trim();
-  if (!output) return "done";
-  const lines = output.split(/\r?\n/).length;
-  return `${lines} ${lines === 1 ? "line" : "lines"}`;
-}
-
-function compactToolLabel(toolName: string) {
-  return toolName === "bash" ? "$" : toolName;
-}
-
-function compactKey(key: string) {
-  const control = key.match(/^ctrl\+(.+)$/i);
-  return control ? `⌃${control[1]!.toUpperCase()}` : key;
-}
-
-export function renderCompactToolLine(
-  instance: ToolExecutionInstance,
-  theme: Theme,
-  expandKey: string,
-  width: number,
-) {
-  const label = theme.fg("toolTitle", compactToolLabel(instance.toolName));
-  const description = describeTool(instance);
-  const left = description
-    ? `${label}  ${theme.fg("muted", description)}`
-    : label;
-  const outcome = theme.fg(
-    instance.result?.isError ? "error" : "dim",
-    summarizeResult(instance.result),
-  );
-  const key = theme.fg("dim", compactKey(expandKey));
-  const right = `${outcome}  ${key}`;
-  const gap = width - visibleWidth(left) - visibleWidth(right);
-  if (gap >= 2) return [`${left}${" ".repeat(gap)}${right}`];
-
-  const leftWidth = Math.max(1, width - visibleWidth(right) - 2);
-  const fittedLeft = truncateToWidth(left, leftWidth, "…");
-  const fittedGap = Math.max(
-    1,
-    width - visibleWidth(fittedLeft) - visibleWidth(right),
-  );
-  return [
-    truncateToWidth(`${fittedLeft}${" ".repeat(fittedGap)}${right}`, width),
-  ];
 }
 
 export function installDenseHistoryPatch(host: HostPiModule): DenseHistoryState {
@@ -186,8 +94,8 @@ export function installDenseHistoryPatch(host: HostPiModule): DenseHistoryState 
     assistantPrototype.updateContent = function (message) {
       if (state.activeTurn) {
         // The global preference keeps settled reasoning collapsed. Temporarily
-        // reveal the component receiving the live stream, then collapse it in
-        // turn_end below.
+        // reveal the component receiving the live stream, then collapse it
+        // only after the complete agent run settles.
         this.hideThinkingBlock = false;
         state.touchedThinking.add(this);
       }
@@ -229,15 +137,7 @@ export function installDenseHistoryPatch(host: HostPiModule): DenseHistoryState 
         !this.isPartial &&
         this.result !== undefined &&
         !state.touchedTools.has(this);
-      if (!shouldCollapse || !state.theme) {
-        return originalToolRender.call(this, width);
-      }
-      return renderCompactToolLine(
-        this,
-        state.theme,
-        host.keyText("app.tools.expand"),
-        width,
-      );
+      return shouldCollapse ? [] : originalToolRender.call(this, width);
     };
     toolPrototype[TOOL_PATCH_KEY] = true;
   }
@@ -245,9 +145,10 @@ export function installDenseHistoryPatch(host: HostPiModule): DenseHistoryState 
   return state;
 }
 
-export default async function (pi: ExtensionAPI) {
-  const state = installDenseHistoryPatch(await loadHostPiModule());
-
+export function registerDenseHistoryEvents(
+  pi: ExtensionAPI,
+  state: DenseHistoryState,
+) {
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     state.theme = ctx.ui.theme;
@@ -257,14 +158,16 @@ export default async function (pi: ExtensionAPI) {
     ctx.ui.setHiddenThinkingLabel("Reasoning · Ctrl+T to expand");
   });
 
-  pi.on("turn_start", (_event, ctx) => {
+  pi.on("agent_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
+    if (!state.activeTurn) {
+      state.touchedThinking.clear();
+      state.touchedTools.clear();
+    }
     state.activeTurn = true;
-    state.touchedThinking.clear();
-    state.touchedTools.clear();
   });
 
-  pi.on("turn_end", (_event, ctx) => {
+  pi.on("agent_settled", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     state.activeTurn = false;
 
@@ -283,4 +186,9 @@ export default async function (pi: ExtensionAPI) {
     state.touchedThinking.clear();
     state.touchedTools.clear();
   });
+}
+
+export default async function (pi: ExtensionAPI) {
+  const state = installDenseHistoryPatch(await loadHostPiModule());
+  registerDenseHistoryEvents(pi, state);
 }
