@@ -28,7 +28,7 @@ function quota(
     id,
     label: id,
     usedPercent: 25,
-    resetsAt: 1_000_000,
+    resetsAt: Date.now() + 5 * 60 * 60_000,
     windowDurationMins,
     stale: false,
   };
@@ -82,6 +82,14 @@ test("footer hides weekly-only Codex buckets and restores Codex when 5h returns"
       { provider: "Claude", id: "seven-day" },
     ],
   );
+});
+
+test("footer hides stale or expired quota data", () => {
+  const stale = quota("Claude", "five-hour", 300);
+  stale.stale = true;
+  const expired = quota("Claude", "seven-day", 10_080);
+  expired.resetsAt = 1;
+  assert.deepEqual(selectFooterQuotaWindows([stale, expired]), []);
 });
 
 test("footer renders the compact repository and usage rows", async () => {
@@ -170,7 +178,8 @@ test("footer renders the compact repository and usage rows", async () => {
   assert.match(lines[0], /\/tmp\/project · main · 3 changed/);
   assert.match(lines[0], /gpt-5\.6-sol · high/);
   assert.match(lines[1], /ctx 5% · chat \$1\.24 · today \$12\.35/);
-  assert.match(lines[1], /✦ 5h 25%/);
-  assert.doesNotMatch(lines[1], /◎/);
+  assert.match(lines[1], /Claude · 5h 25%, resets in/);
+  assert.doesNotMatch(lines[1], /Codex/);
+  assert.doesNotMatch(lines[1], /[✦◎~↻]/);
   assert.equal(lines.every((line: string) => visibleWidth(line) <= 160), true);
 });

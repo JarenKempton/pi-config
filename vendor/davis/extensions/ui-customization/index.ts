@@ -148,11 +148,19 @@ export function formatQuotaCountdown(
   return `${days}d${remainingHours ? `${remainingHours}h` : ""}`;
 }
 
-export function selectFooterQuotaWindows(windows: DashboardQuotaWindow[]) {
-  const codex = windows.filter(
+export function selectFooterQuotaWindows(
+  windows: DashboardQuotaWindow[],
+  now = Date.now(),
+) {
+  const current = windows.filter(
+    (window) =>
+      !window.stale &&
+      (window.resetsAt === undefined || window.resetsAt > now),
+  );
+  const codex = current.filter(
     (window) => window.provider === "Codex" && isFiveHourWindow(window),
   );
-  const claude = windows
+  const claude = current
     .filter(
       (window) =>
         window.provider === "Claude" &&
@@ -179,7 +187,7 @@ function formatQuotaWindows(
   theme: Theme,
   now = Date.now(),
 ) {
-  const selected = selectFooterQuotaWindows(windows);
+  const selected = selectFooterQuotaWindows(windows, now);
   const providers = ["Codex", "Claude"] as const;
   return providers
     .flatMap((provider) => {
@@ -187,19 +195,23 @@ function formatQuotaWindows(
         (window) => window.provider === provider,
       );
       if (!providerWindows.length) return [];
-      const icon = theme.fg(
+      const label = theme.fg(
         provider === "Codex" ? "success" : "warning",
-        provider === "Codex" ? "◎" : "✦",
+        provider,
       );
       const values = providerWindows.map((window) => {
-        const percent = `${Math.round(window.usedPercent)}%${window.stale ? "~" : ""}`;
-        return [
-          theme.fg("muted", quotaPeriod(window)),
-          theme.fg(quotaColor(window.usedPercent), percent),
-          theme.fg("dim", `↻${formatQuotaCountdown(window.resetsAt, now)}`),
-        ].join(" ");
+        const period = theme.fg("muted", quotaPeriod(window));
+        const percent = theme.fg(
+          quotaColor(window.usedPercent),
+          `${Math.round(window.usedPercent)}%`,
+        );
+        const reset = theme.fg(
+          "dim",
+          `resets in ${formatQuotaCountdown(window.resetsAt, now)}`,
+        );
+        return `${period} ${percent}, ${reset}`;
       });
-      return [`${icon} ${values.join(" · ")}`];
+      return [`${label} · ${values.join(" · ")}`];
     })
     .join("   ");
 }
