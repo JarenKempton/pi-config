@@ -52,7 +52,7 @@ test("footer quota countdown stays compact", () => {
   );
 });
 
-test("footer hides weekly-only Codex buckets and restores Codex when 5h returns", () => {
+test("footer shows canonical Codex windows and hides model-specific buckets", () => {
   const weeklyOnly = [
     quota("Codex", "codex:primary", 10_080),
     quota("Codex", "codex-spark:primary", 10_080),
@@ -65,6 +65,7 @@ test("footer hides weekly-only Codex buckets and restores Codex when 5h returns"
       id,
     })),
     [
+      { provider: "Codex", id: "codex:primary" },
       { provider: "Claude", id: "five-hour" },
       { provider: "Claude", id: "seven-day" },
     ],
@@ -78,6 +79,7 @@ test("footer hides weekly-only Codex buckets and restores Codex when 5h returns"
     })),
     [
       { provider: "Codex", id: "five-hour" },
+      { provider: "Codex", id: "codex:primary" },
       { provider: "Claude", id: "five-hour" },
       { provider: "Claude", id: "seven-day" },
     ],
@@ -179,8 +181,8 @@ test("footer renders the compact repository and usage rows", async () => {
   assert.match(lines[0], /\/tmp\/project · main · 3 changed/);
   assert.match(lines[0], /gpt-5\.6-sol · high/);
   assert.match(lines[1], /ctx 5% · chat \$1\.24 · today \$12\.35/);
+  assert.match(lines[1], /Codex · week 25%, resets in/);
   assert.match(lines[1], /Claude · 5h 25%, resets in/);
-  assert.doesNotMatch(lines[1], /Codex/);
   assert.doesNotMatch(lines[1], /[✦◎~↻]/);
   assert.equal(lines.every((line: string) => visibleWidth(line) <= 160), true);
 

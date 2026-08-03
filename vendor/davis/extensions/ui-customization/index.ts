@@ -158,9 +158,20 @@ export function selectFooterQuotaWindows(
       window.resetsAt === undefined ||
       window.resetsAt > now,
   );
-  const codex = current.filter(
-    (window) => window.provider === "Codex" && isFiveHourWindow(window),
-  );
+  const codex = current
+    .filter(
+      (window) =>
+        window.provider === "Codex" &&
+        (window.id === "five-hour" || window.id.startsWith("codex:")) &&
+        (isFiveHourWindow(window) || isWeeklyWindow(window)),
+    )
+    .sort((left, right) =>
+      isFiveHourWindow(left) === isFiveHourWindow(right)
+        ? 0
+        : isFiveHourWindow(left)
+          ? -1
+          : 1,
+    );
   const claude = current
     .filter(
       (window) =>
@@ -174,7 +185,7 @@ export function selectFooterQuotaWindows(
           ? -1
           : 1,
     );
-  return [...codex.slice(0, 1), ...claude.slice(0, 2)];
+  return [...codex.slice(0, 2), ...claude.slice(0, 2)];
 }
 
 function quotaColor(usedPercent: number) {
