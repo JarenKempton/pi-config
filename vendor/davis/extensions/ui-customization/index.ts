@@ -4,6 +4,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   ReadonlyFooterDataProvider,
+  Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
   getCapabilities,
@@ -104,12 +105,6 @@ function gradientText(text: string, phase: number) {
     .join("");
 }
 
-function formatTokens(tokens: number) {
-  if (tokens < 1_000) return `${tokens}`;
-  if (tokens < 1_000_000) return `${Math.round(tokens / 1_000)}k`;
-  return `${(tokens / 1_000_000).toFixed(1)}m`;
-}
-
 function formatDirectory(cwd: string) {
   const home = homedir();
   if (cwd === home) return "~";
@@ -117,33 +112,96 @@ function formatDirectory(cwd: string) {
   return sanitizeTerminalLabel(display);
 }
 
-function formatMoney(value: number) {
-  return `$${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : value >= 1 ? 2 : 4)}`;
+export function formatMoney(value: number) {
+  return `$${value.toFixed(2)}`;
+}
+
+function isFiveHourWindow(window: DashboardQuotaWindow) {
+  return window.windowDurationMins === 300 || window.id === "five-hour";
+}
+
+function isWeeklyWindow(window: DashboardQuotaWindow) {
+  return window.windowDurationMins === 10_080 || window.id === "seven-day";
 }
 
 function quotaPeriod(window: DashboardQuotaWindow) {
-  if (window.windowDurationMins === 300 || window.id === "five-hour") return "5h";
-  if (window.windowDurationMins === 10_080 || window.id === "seven-day") return "week";
+  if (isFiveHourWindow(window)) return "5h";
+  if (isWeeklyWindow(window)) return "week";
   if (window.windowDurationMins && window.windowDurationMins % 1_440 === 0) {
     return `${window.windowDurationMins / 1_440}d`;
   }
   return window.label.replace(/\s+window$/i, "");
 }
 
-function formatQuotaWindows(windows: DashboardQuotaWindow[]) {
-  return windows
-    .slice()
-    .sort((left, right) => {
-      const rank = (window: DashboardQuotaWindow) =>
-        window.id === "five-hour" ? 0 : window.id === "seven-day" ? 1 : 2;
-      return rank(left) - rank(right);
-    })
-    .slice(0, 4)
-    .map(
+export function formatQuotaCountdown(
+  resetsAt: number | undefined,
+  now = Date.now(),
+) {
+  if (resetsAt === undefined) return "?";
+  const minutes = Math.ceil((resetsAt - now) / 60_000);
+  if (minutes <= 0) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return `${days}d${remainingHours ? `${remainingHours}h` : ""}`;
+}
+
+export function selectFooterQuotaWindows(windows: DashboardQuotaWindow[]) {
+  const codex = windows.filter(
+    (window) => window.provider === "Codex" && isFiveHourWindow(window),
+  );
+  const claude = windows
+    .filter(
       (window) =>
-        `${window.provider} ${quotaPeriod(window)} ${Math.round(window.usedPercent)}%${window.stale ? "~" : ""}`,
+        window.provider === "Claude" &&
+        (isFiveHourWindow(window) || isWeeklyWindow(window)),
     )
-    .join(" · ");
+    .sort((left, right) =>
+      isFiveHourWindow(left) === isFiveHourWindow(right)
+        ? 0
+        : isFiveHourWindow(left)
+          ? -1
+          : 1,
+    );
+  return [...codex.slice(0, 1), ...claude.slice(0, 2)];
+}
+
+function quotaColor(usedPercent: number) {
+  if (usedPercent >= 85) return "error";
+  if (usedPercent >= 60) return "warning";
+  return "success";
+}
+
+function formatQuotaWindows(
+  windows: DashboardQuotaWindow[],
+  theme: Theme,
+  now = Date.now(),
+) {
+  const selected = selectFooterQuotaWindows(windows);
+  const providers = ["Codex", "Claude"] as const;
+  return providers
+    .flatMap((provider) => {
+      const providerWindows = selected.filter(
+        (window) => window.provider === provider,
+      );
+      if (!providerWindows.length) return [];
+      const icon = theme.fg(
+        provider === "Codex" ? "success" : "warning",
+        provider === "Codex" ? "◎" : "✦",
+      );
+      const values = providerWindows.map((window) => {
+        const percent = `${Math.round(window.usedPercent)}%${window.stale ? "~" : ""}`;
+        return [
+          theme.fg("muted", quotaPeriod(window)),
+          theme.fg(quotaColor(window.usedPercent), percent),
+          theme.fg("dim", `↻${formatQuotaCountdown(window.resetsAt, now)}`),
+        ].join(" ");
+      });
+      return [`${icon} ${values.join(" · ")}`];
+    })
+    .join("   ");
 }
 
 function center(text: string, width: number) {
@@ -232,51 +290,52 @@ export default function uiCustomization(pi: ExtensionAPI) {
       return {
         invalidate() {},
         render(width: number) {
-          const directory = theme.fg("text", formatDirectory(ctx.cwd));
-          const fileLabel = gitInfo.changedFiles === 1 ? "file" : "files";
-          let git = gitInfo.branch
-            ? `${gitInfo.branch} · ${gitInfo.changedFiles} ${fileLabel} changed`
-            : "";
-
+          const locationParts = [theme.fg("text", formatDirectory(ctx.cwd))];
+          if (gitInfo.branch) {
+            locationParts.push(theme.fg("muted", gitInfo.branch));
+          }
+          if (gitInfo.changedFiles > 0) {
+            locationParts.push(
+              theme.fg("muted", `${gitInfo.changedFiles} changed`),
+            );
+          }
           if (gitInfo.pullRequest) {
             const prLabel = `PR #${gitInfo.pullRequest.number}`;
             const linkedPr = getCapabilities().hyperlinks
               ? hyperlink(prLabel, gitInfo.pullRequest.url)
               : prLabel;
-            git += ` · ${linkedPr}`;
+            locationParts.push(theme.fg("muted", linkedPr));
           }
+          const location = locationParts.join(theme.fg("dim", " · "));
 
           const contextPercent =
             modelInfo.contextPercent === null
               ? "?"
               : `${Math.round(modelInfo.contextPercent)}`;
-          const contextWindow =
-            modelInfo.contextWindow > 0
-              ? formatTokens(modelInfo.contextWindow)
-              : "?";
-          const tps =
-            modelInfo.tokensPerSecond === null
-              ? "— tok/s"
-              : `${Math.round(modelInfo.tokensPerSecond)} tok/s`;
-          const subagents =
-            subagentInfo.count === 0
-              ? ""
-              : ` · subagents ${subagentInfo.costKnown ? "" : "≥"}${formatMoney(subagentInfo.costUsd)}`;
-          const today =
-            accountingInfo.todayCost === null
-              ? ""
-              : ` · today ${accountingInfo.todayRateKnown ? "" : "≥"}${formatMoney(accountingInfo.todayCost)}`;
-          const usage = `${contextPercent}%/${contextWindow} · chat ${formatMoney(modelInfo.cost)}${subagents}${today} · ${tps}`;
-          const quotas = formatQuotaWindows(accountingInfo.quotaWindows);
-          const model = modelInfo.provider
-            ? `${modelInfo.provider}/${modelInfo.modelId} · ${modelInfo.thinking}`
-            : modelInfo.modelId;
+          const usageParts = [
+            `ctx ${contextPercent}%`,
+            `chat ${formatMoney(modelInfo.cost)}`,
+          ];
+          if (subagentInfo.count > 0) {
+            usageParts.push(
+              `agents ${subagentInfo.costKnown ? "" : "≥"}${formatMoney(subagentInfo.costUsd)}`,
+            );
+          }
+          if (accountingInfo.todayCost !== null) {
+            usageParts.push(
+              `today ${accountingInfo.todayRateKnown ? "" : "≥"}${formatMoney(accountingInfo.todayCost)}`,
+            );
+          }
+          const usage = usageParts.join(" · ");
+          const quotas = formatQuotaWindows(accountingInfo.quotaWindows, theme);
+          const model = modelInfo.thinking === "off"
+            ? modelInfo.modelId
+            : `${modelInfo.modelId} · ${modelInfo.thinking}`;
 
           const lines = [
-            columns(directory, theme.fg("muted", model), width),
-            columns(theme.fg("muted", usage), theme.fg("muted", git), width),
+            columns(location, theme.fg("muted", model), width),
+            columns(theme.fg("muted", usage), quotas, width),
           ];
-          if (quotas) lines.push(theme.fg("dim", truncateToWidth(quotas, width)));
 
           // Extension statuses render after the dashboard lines, one per row.
           const statuses = footerData.getExtensionStatuses();

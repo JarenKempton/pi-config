@@ -56,6 +56,7 @@ export default function (pi: ExtensionAPI) {
                       id: window.id,
                       label: window.label,
                       usedPercent: window.usedPercent,
+                      resetsAt: window.resetsAt,
                       windowDurationMins: window.windowDurationMins,
                       stale: provider.stale,
                     },

@@ -35,6 +35,7 @@ export interface DashboardQuotaWindow {
   id: string;
   label: string;
   usedPercent: number;
+  resetsAt?: number;
   windowDurationMins?: number;
   stale: boolean;
 }
@@ -142,6 +143,7 @@ function isDashboardQuotaWindow(value: unknown): value is DashboardQuotaWindow {
     typeof value.id === "string" &&
     typeof value.label === "string" &&
     typeof value.usedPercent === "number" &&
+    (value.resetsAt === undefined || typeof value.resetsAt === "number") &&
     (value.windowDurationMins === undefined ||
       typeof value.windowDurationMins === "number") &&
     typeof value.stale === "boolean"
