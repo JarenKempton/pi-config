@@ -84,12 +84,13 @@ test("footer hides weekly-only Codex buckets and restores Codex when 5h returns"
   );
 });
 
-test("footer hides stale or expired quota data", () => {
+test("footer keeps stale quota context but hides expired current data", () => {
   const stale = quota("Claude", "five-hour", 300);
   stale.stale = true;
+  stale.resetsAt = 1;
   const expired = quota("Claude", "seven-day", 10_080);
   expired.resetsAt = 1;
-  assert.deepEqual(selectFooterQuotaWindows([stale, expired]), []);
+  assert.deepEqual(selectFooterQuotaWindows([stale, expired]), [stale]);
 });
 
 test("footer renders the compact repository and usage rows", async () => {
@@ -182,4 +183,20 @@ test("footer renders the compact repository and usage rows", async () => {
   assert.doesNotMatch(lines[1], /Codex/);
   assert.doesNotMatch(lines[1], /[✦◎~↻]/);
   assert.equal(lines.every((line: string) => visibleWidth(line) <= 160), true);
+
+  const staleFiveHour = quota("Claude", "five-hour", 300);
+  staleFiveHour.stale = true;
+  staleFiveHour.resetsAt = 1;
+  const staleWeek = quota("Claude", "seven-day", 10_080);
+  staleWeek.stale = true;
+  staleWeek.resetsAt = 1;
+  pi.events.emit(ACCOUNTING_INFO_CHANNEL, {
+    todayCost: 12.345,
+    todayRateKnown: true,
+    quotaWindows: [staleFiveHour, staleWeek],
+    updatedAt: 1_000_000,
+  });
+  const staleLines = footer.render(160);
+  assert.match(staleLines[1], /Claude · stale · 5h 25% · week 25%/);
+  assert.doesNotMatch(staleLines[1], /resets in/);
 });

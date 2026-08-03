@@ -154,8 +154,9 @@ export function selectFooterQuotaWindows(
 ) {
   const current = windows.filter(
     (window) =>
-      !window.stale &&
-      (window.resetsAt === undefined || window.resetsAt > now),
+      window.stale ||
+      window.resetsAt === undefined ||
+      window.resetsAt > now,
   );
   const codex = current.filter(
     (window) => window.provider === "Codex" && isFiveHourWindow(window),
@@ -199,19 +200,22 @@ function formatQuotaWindows(
         provider === "Codex" ? "success" : "warning",
         provider,
       );
+      const stale = providerWindows.every((window) => window.stale);
       const values = providerWindows.map((window) => {
         const period = theme.fg("muted", quotaPeriod(window));
         const percent = theme.fg(
-          quotaColor(window.usedPercent),
+          stale ? "muted" : quotaColor(window.usedPercent),
           `${Math.round(window.usedPercent)}%`,
         );
+        if (stale) return `${period} ${percent}`;
         const reset = theme.fg(
           "dim",
           `resets in ${formatQuotaCountdown(window.resetsAt, now)}`,
         );
         return `${period} ${percent}, ${reset}`;
       });
-      return [`${label} · ${values.join(" · ")}`];
+      const state = stale ? ` · ${theme.fg("dim", "stale")}` : "";
+      return [`${label}${state} · ${values.join(" · ")}`];
     })
     .join("   ");
 }
