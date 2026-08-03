@@ -254,11 +254,6 @@ function columns(left: string, right: string, width: number) {
   );
 }
 
-function alignRight(value: string, width: number) {
-  const fitted = truncateToWidth(value, width);
-  return `${" ".repeat(Math.max(0, width - visibleWidth(fitted)))}${fitted}`;
-}
-
 export default function uiCustomization(pi: ExtensionAPI) {
   let title = "pi";
   let modelInfo = emptyModelInfoState();
@@ -374,20 +369,26 @@ export default function uiCustomization(pi: ExtensionAPI) {
             ? modelInfo.modelId
             : `${modelInfo.modelId} · ${modelInfo.thinking}`;
 
-          const lines = [
-            columns(location, theme.fg("muted", model), width),
-            columns(usage, quotaLines[0] ?? "", width),
-            ...quotaLines.slice(1).map((line) => alignRight(line, width)),
-          ];
-
-          // Extension statuses render after the dashboard lines, one per row.
           const statuses = footerData.getExtensionStatuses();
           const statusLines = Array.from(statuses.entries())
             .sort(([a], [b]) => a.localeCompare(b))
             .flatMap(([, text]) => text.split("\n"));
-          for (const statusLine of statusLines) {
+          const secondaryQuotaLines = quotaLines.slice(1);
+          const lines = [
+            columns(location, theme.fg("muted", model), width),
+            columns(usage, quotaLines[0] ?? "", width),
+          ];
+          const detailRows = Math.max(
+            statusLines.length,
+            secondaryQuotaLines.length,
+          );
+          for (let index = 0; index < detailRows; index++) {
             lines.push(
-              truncateToWidth(statusLine, width, theme.fg("dim", "...")),
+              columns(
+                statusLines[index] ?? "",
+                secondaryQuotaLines[index] ?? "",
+                width,
+              ),
             );
           }
 
