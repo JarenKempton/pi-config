@@ -107,6 +107,22 @@ Before generating a project's first canonical plan:
 
 When the user explicitly requests a destination change, update that one canonical project entry and report the old and new value.
 
+## Local compiler integration
+
+Use the canonical local compiler at `/Users/jaren/Documents/html-plan-publisher`. Do not handcraft HTML or assume a globally installed binary.
+
+Before rendering, run:
+
+```sh
+cd /Users/jaren/Documents/html-plan-publisher
+npm run build
+node dist/packages/cli/src/index.js fmt <source.plan.md>
+node dist/packages/cli/src/index.js lint <source.plan.md>
+node dist/packages/cli/src/index.js render <source.plan.md> --output <artifact.html>
+```
+
+For a reproducibility check after the lock exists, render again with `--locked`. Treat any parse, semantic, lint-error, stale-lock, or render failure as blocking. Warnings require review but do not automatically block. Never use publish or host commands as part of local generation.
+
 ## Author and compile the artifact
 
 After the gate passes and storage is resolved:
