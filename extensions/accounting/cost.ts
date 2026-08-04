@@ -3,6 +3,12 @@ import { existsSync, statSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  loadPricingCatalog,
+  normalizeModelName,
+  type PricingCatalog,
+  type Rate,
+} from "./pricing.ts";
 
 export type Period = "today" | "7d" | "30d" | "all";
 
@@ -34,54 +40,7 @@ export interface CostReport {
   notes: string[];
 }
 
-interface Rate {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite5m: number;
-  cacheWrite1h: number;
-}
-
 const DAY = 24 * 60 * 60 * 1000;
-
-// USD per million tokens, sourced from the vendors' public API pricing pages.
-// Pi-native rows prefer the exact per-category cost already recorded by Pi.
-const RATES: Record<string, Rate> = {
-  "claude-fable-5": rate(10, 50),
-  "claude-mythos-5": rate(10, 50),
-  "claude-opus-4-8": rate(5, 25),
-  "claude-opus-4-7": rate(5, 25),
-  "claude-opus-4-6": rate(5, 25),
-  "claude-opus-4-5": rate(5, 25),
-  "claude-opus-4-1": rate(15, 75),
-  "claude-opus-4": rate(15, 75),
-  "claude-sonnet-5": rate(2, 10),
-  "claude-sonnet-4-6": rate(3, 15),
-  "claude-sonnet-4-5": rate(3, 15),
-  "claude-sonnet-4": rate(3, 15),
-  "claude-haiku-4-5": rate(1, 5),
-  "claude-3-5-haiku": rate(0.8, 4),
-  "gpt-5": openAiRate(1.25, 10, 0.125),
-  "gpt-5-mini": openAiRate(0.25, 2, 0.025),
-  "gpt-5-nano": openAiRate(0.05, 0.4, 0.005),
-  "gpt-4.1": openAiRate(2, 8, 0.5),
-  "gpt-4.1-mini": openAiRate(0.4, 1.6, 0.1),
-  "gpt-4o": openAiRate(2.5, 10, 1.25),
-};
-
-function rate(input: number, output: number): Rate {
-  return {
-    input,
-    output,
-    cacheRead: input * 0.1,
-    cacheWrite5m: input * 1.25,
-    cacheWrite1h: input * 2,
-  };
-}
-
-function openAiRate(input: number, output: number, cacheRead: number): Rate {
-  return { input, output, cacheRead, cacheWrite5m: input, cacheWrite1h: input };
-}
 
 function n(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -203,27 +162,31 @@ function add(
   else row.apiEquivalentUsd += estimate;
 }
 
-function staticRateFor(model: string) {
-  const normalized = model.toLowerCase().replace(/\./g, "-").split("/").at(-1) ?? "";
+function catalogRateFor(model: string, rates: ReadonlyMap<string, Rate>) {
+  const normalized = normalizeModelName(model);
   let best: string | undefined;
-  for (const key of Object.keys(RATES)) {
+  for (const key of rates.keys()) {
     const matches = normalized === key || normalized.startsWith(`${key}-20`);
     if (matches && (!best || key.length > best.length)) best = key;
   }
-  return best ? RATES[best] : undefined;
+  return best ? rates.get(best) : undefined;
 }
 
 function modelRate(
   model: string,
   inferredRates: ReadonlyMap<string, Rate>,
+  catalogRates: ReadonlyMap<string, Rate>,
 ): Rate | undefined {
-  return inferredRates.get(model.toLowerCase()) ?? staticRateFor(model);
+  return (
+    catalogRateFor(model, catalogRates) ?? inferredRates.get(model.toLowerCase())
+  );
 }
 
 function estimate(
   usage: TokenUsage,
   model: string,
   inferredRates: ReadonlyMap<string, Rate>,
+  catalogRates: ReadonlyMap<string, Rate>,
   options: {
     cacheWrite5m?: number;
     cacheWrite1h?: number;
@@ -231,7 +194,7 @@ function estimate(
     multiplier?: number;
   } = {},
 ) {
-  let prices = modelRate(model, inferredRates);
+  let prices = modelRate(model, inferredRates, catalogRates);
   if (!prices) return undefined;
   const multiplier = options.multiplier ?? 1;
   prices = {
@@ -299,6 +262,7 @@ async function parsePi(
   skipped: Record<string, number>,
   seen: Set<string>,
   inferredRates: Map<string, Rate>,
+  catalogRates: ReadonlyMap<string, Rate>,
 ) {
   for (const root of paths) {
     for await (const file of walk(root)) {
@@ -334,7 +298,8 @@ async function parsePi(
           String(message.provider ?? obj.provider ?? "unknown"),
           model,
           usage,
-          recordedPiCost(message.usage) ?? estimate(usage, model, inferredRates),
+          recordedPiCost(message.usage) ??
+            estimate(usage, model, inferredRates, catalogRates),
         );
       }
     }
@@ -348,6 +313,7 @@ async function parseCodex(
   skipped: Record<string, number>,
   seen: Set<string>,
   inferredRates: ReadonlyMap<string, Rate>,
+  catalogRates: ReadonlyMap<string, Rate>,
 ) {
   for (const root of paths) {
     for await (const file of walk(root)) {
@@ -397,7 +363,7 @@ async function parseCodex(
           "openai-codex",
           model,
           usage,
-          estimate(usage, model, inferredRates),
+          estimate(usage, model, inferredRates, catalogRates),
         );
       }
     }
@@ -411,6 +377,7 @@ async function parseClaude(
   skipped: Record<string, number>,
   seen: Set<string>,
   inferredRates: ReadonlyMap<string, Rate>,
+  catalogRates: ReadonlyMap<string, Rate>,
 ) {
   for (const root of paths) {
     for await (const file of walk(root)) {
@@ -458,7 +425,7 @@ async function parseClaude(
           "anthropic",
           model,
           usage,
-          estimate(usage, model, inferredRates, {
+          estimate(usage, model, inferredRates, catalogRates, {
             cacheWrite5m: hasCacheDetails
               ? n(cache.ephemeral_5m_input_tokens)
               : undefined,
@@ -479,11 +446,13 @@ export async function collectCostReport(
     period?: Period;
     now?: Date;
     roots?: { pi?: string[]; codex?: string[]; claude?: string[] };
+    pricingCatalog?: PricingCatalog;
   } = {},
 ): Promise<CostReport> {
   const period = options.period ?? "7d";
   const now = options.now ?? new Date();
   const since = periodSince(period, now);
+  const pricing = options.pricingCatalog ?? await loadPricingCatalog({ now });
   const home = homedir();
   const roots = {
     pi: options.roots?.pi ?? [join(home, ".pi/agent/sessions")],
@@ -498,7 +467,15 @@ export async function collectCostReport(
   const seen = new Set<string>();
   const inferredRates = new Map<string, Rate>();
 
-  await parsePi(roots.pi, since, rows, skipped, seen, inferredRates);
+  await parsePi(
+    roots.pi,
+    since,
+    rows,
+    skipped,
+    seen,
+    inferredRates,
+    pricing.rates,
+  );
   await parseCodex(
     roots.codex,
     since,
@@ -506,6 +483,7 @@ export async function collectCostReport(
     skipped,
     seen,
     inferredRates,
+    pricing.rates,
   );
   await parseClaude(
     roots.claude,
@@ -514,6 +492,7 @@ export async function collectCostReport(
     skipped,
     seen,
     inferredRates,
+    pricing.rates,
   );
 
   const output = [...rows.values()].sort(
@@ -547,7 +526,9 @@ export async function collectCostReport(
 
   const notes = [
     "API-equivalent estimates are not invoices and do not represent subscription charges.",
-    "Pi rows use Pi's recorded per-request cost when available; external rows use public per-token rates or rates inferred from matching Pi model records.",
+    "Pi rows use Pi's recorded per-request cost when available; external rows prefer current official OpenAI and Anthropic prices, then locally inferred rates.",
+    "External history is revalued at the current catalog rate; it is not a historical invoice.",
+    ...pricing.notes,
   ];
   if (output.some((row) => !row.rateKnown)) {
     notes.push(
