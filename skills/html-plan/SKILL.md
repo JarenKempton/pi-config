@@ -143,8 +143,9 @@ After the gate passes and storage is resolved:
 Use a minimap only when the document is long enough that section position benefits the reader. Keep it a quiet visual rail rather than a second navigation panel:
 
 - render equal, hairline horizontal marks approximately `1px` high in a very narrow fixed rail;
-- keep inactive marks short and muted; extend only the current section mark modestly and do not add a scrollbar-like progress track;
-- on desktop, allow hover or keyboard focus to reveal the section name and allow click activation to jump to it;
+- keep every mark the same normal length at rest; indicate the current section with color only, never persistent expansion, and do not add a scrollbar-like progress track;
+- on desktop, expand marks only during deliberate hover or keyboard focus; use stable fixed rows with no vertical displacement or continuously recalculated geometry;
+- reveal a readable section preview on hover or focus, keep it open while the preview itself is hovered or focused, and make both the mark and preview navigate to that section;
 - on mobile, keep the rail visual-only: remove it from the accessibility tree and tab order, disable pointer interaction, labels, click navigation, dragging, and scrubbing;
 - never enlarge mobile marks into touch handles or let the rail overlap content;
 - hide the minimap in print.
